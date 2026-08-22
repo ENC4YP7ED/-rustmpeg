@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod ffmpeg;
 mod ffprobe;
 
 use std::ffi::OsString;
@@ -35,8 +36,9 @@ pub fn run(program: Program, args: impl IntoIterator<Item = OsString>) -> i32 {
     }
 
     match program {
+        Program::Ffmpeg => ffmpeg::run(&args),
         Program::Ffprobe => ffprobe::run(&args),
-        Program::Ffmpeg | Program::Ffplay => run_bootstrap(program, &args),
+        Program::Ffplay => run_bootstrap(program, &args),
     }
 }
 
