@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod image2;
+
 use rm_codec::{CodecId, pcm_bits_per_sample, pcm_from_wave_tag, pcm_wave_format_tag};
 use rm_core::{MediaError, Result};
 use rm_io::{ByteReader, ByteWriter};
@@ -13,13 +15,22 @@ pub struct FormatDescriptor {
     pub can_mux: bool,
 }
 
-const FORMATS: [FormatDescriptor; 1] = [FormatDescriptor {
-    name: "wav",
-    long_name: "WAV / WAVE (Waveform Audio)",
-    extensions: &["wav", "wave"],
-    can_demux: true,
-    can_mux: true,
-}];
+const FORMATS: [FormatDescriptor; 2] = [
+    FormatDescriptor {
+        name: "wav",
+        long_name: "WAV / WAVE (Waveform Audio)",
+        extensions: &["wav", "wave"],
+        can_demux: true,
+        can_mux: true,
+    },
+    FormatDescriptor {
+        name: "image2",
+        long_name: "image2 sequence",
+        extensions: &["pbm", "pgm", "ppm", "pnm"],
+        can_demux: true,
+        can_mux: true,
+    },
+];
 
 #[must_use]
 pub const fn formats() -> &'static [FormatDescriptor] {
