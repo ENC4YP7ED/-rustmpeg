@@ -8,7 +8,8 @@ fn temp_dir(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("rustmpeg-{label}-{}-{nonce}", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("rustmpeg-{label}-{}-{nonce}", std::process::id()));
     fs::create_dir_all(&path).unwrap();
     path
 }
@@ -64,7 +65,11 @@ fn stream_copy_produces_valid_canonical_wave_with_identical_pcm() {
         &[&input, &output],
         &["-hide_banner", "-y", "-i", "{path}", "-c", "copy", "{path}"],
     );
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
 
     let bytes = fs::read(&output).unwrap();
     assert_eq!(&bytes[0..4], b"RIFF");
@@ -89,9 +94,21 @@ fn pcm_s16_to_u8_transcoding_has_expected_endpoint_samples() {
 
     let result = run(
         &[&input, &output],
-        &["-hide_banner", "-y", "-i", "{path}", "-c:a", "pcm_u8", "{path}"],
+        &[
+            "-hide_banner",
+            "-y",
+            "-i",
+            "{path}",
+            "-c:a",
+            "pcm_u8",
+            "{path}",
+        ],
     );
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let bytes = fs::read(&output).unwrap();
     assert_eq!(u16::from_le_bytes([bytes[34], bytes[35]]), 8);
     assert_eq!(&bytes[44..47], &[0, 128, 255]);
@@ -109,8 +126,15 @@ fn default_wave_encoder_converts_float32_to_signed16() {
     pcm.extend_from_slice(&1.0_f32.to_le_bytes());
     fs::write(&input, wav(3, 1, 48_000, 32, &pcm)).unwrap();
 
-    let result = run(&[&input, &output], &["-hide_banner", "-y", "-i", "{path}", "{path}"]);
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let result = run(
+        &[&input, &output],
+        &["-hide_banner", "-y", "-i", "{path}", "{path}"],
+    );
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let bytes = fs::read(&output).unwrap();
     assert_eq!(u16::from_le_bytes([bytes[20], bytes[21]]), 1);
     assert_eq!(u16::from_le_bytes([bytes[34], bytes[35]]), 16);
@@ -130,7 +154,10 @@ fn existing_output_requires_explicit_overwrite_policy() {
     fs::write(&input, wav(1, 1, 8_000, 16, &[0, 0])).unwrap();
     fs::write(&output, b"existing").unwrap();
 
-    let result = run(&[&input, &output], &["-hide_banner", "-i", "{path}", "-c", "copy", "{path}"]);
+    let result = run(
+        &[&input, &output],
+        &["-hide_banner", "-i", "{path}", "-c", "copy", "{path}"],
+    );
     assert!(!result.status.success());
     assert!(String::from_utf8_lossy(&result.stderr).contains("use -y to overwrite"));
     assert_eq!(fs::read(&output).unwrap(), b"existing");

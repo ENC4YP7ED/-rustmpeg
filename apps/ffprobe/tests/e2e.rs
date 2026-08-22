@@ -8,7 +8,8 @@ fn temp_dir(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("rustmpeg-{label}-{}-{nonce}", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("rustmpeg-{label}-{}-{nonce}", std::process::id()));
     fs::create_dir_all(&path).unwrap();
     path
 }
@@ -49,7 +50,11 @@ fn show_streams_and_format_report_consistent_metadata() {
         .arg(&input)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("[STREAM]"));
     assert!(stdout.contains("codec_name=pcm_s16le"));
@@ -98,7 +103,14 @@ fn capability_lists_only_advertise_real_implemented_surface() {
         .unwrap();
     assert!(codecs.status.success());
     let codecs = String::from_utf8(codecs.stdout).unwrap();
-    for name in ["pcm_u8", "pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_f32le", "pcm_f64le"] {
+    for name in [
+        "pcm_u8",
+        "pcm_s16le",
+        "pcm_s24le",
+        "pcm_s32le",
+        "pcm_f32le",
+        "pcm_f64le",
+    ] {
         assert!(codecs.contains(name), "missing codec {name}");
     }
     assert!(!codecs.contains("h264"));

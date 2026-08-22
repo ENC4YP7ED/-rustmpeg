@@ -58,7 +58,17 @@ fn every_pcm_pair_converts_with_expected_output_length() {
 
 #[test]
 fn canonical_amplitudes_round_trip_through_every_pcm_format() {
-    let samples = [-1.0, -0.75, -0.5, -1.0 / 32_768.0, 0.0, 1.0 / 32_768.0, 0.5, 0.75, 1.0];
+    let samples = [
+        -1.0,
+        -0.75,
+        -0.5,
+        -1.0 / 32_768.0,
+        0.0,
+        1.0 / 32_768.0,
+        0.5,
+        0.75,
+        1.0,
+    ];
     let source = f64_bytes(&samples);
 
     for codec in CODECS {

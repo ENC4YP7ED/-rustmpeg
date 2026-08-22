@@ -147,7 +147,9 @@ fn wave_format_extensible_pcm_is_recognized() {
     fmt.extend_from_slice(&bits.to_le_bytes());
     fmt.extend_from_slice(&3_u32.to_le_bytes());
     fmt.extend_from_slice(&1_u32.to_le_bytes());
-    fmt.extend_from_slice(&[0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71]);
+    fmt.extend_from_slice(&[
+        0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
+    ]);
 
     let mut body = Vec::new();
     push_chunk(&mut body, b"fmt ", &fmt);
@@ -178,7 +180,10 @@ fn malformed_headers_and_chunk_sizes_are_rejected() {
     let valid = manual_wave(CodecId::PcmS16Le, 1, 44_100, &[0, 0]);
 
     for len in 0..12 {
-        assert!(parse_wave(&valid[..len]).is_err(), "accepted truncated header length {len}");
+        assert!(
+            parse_wave(&valid[..len]).is_err(),
+            "accepted truncated header length {len}"
+        );
     }
 
     let mut bad_signature = valid.clone();

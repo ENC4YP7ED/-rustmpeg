@@ -25,7 +25,12 @@ pub fn run(args: &[OsString]) -> i32 {
 }
 
 fn run_inner(args: &[OsString]) -> Result<()> {
-    if args.len() <= 1 || args.iter().skip(1).any(|arg| is(arg, "-h") || is(arg, "-help") || is(arg, "--help")) {
+    if args.len() <= 1
+        || args
+            .iter()
+            .skip(1)
+            .any(|arg| is(arg, "-h") || is(arg, "-help") || is(arg, "--help"))
+    {
         print_help();
         return Ok(());
     }
@@ -86,7 +91,9 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
         } else if is(arg, "-v") || is(arg, "-loglevel") {
             index += 1;
             if index >= args.len() {
-                return Err(MediaError::invalid_argument("missing value for loglevel option"));
+                return Err(MediaError::invalid_argument(
+                    "missing value for loglevel option",
+                ));
             }
         } else if is(arg, "-of") || is(arg, "-print_format") {
             index += 1;
@@ -161,7 +168,10 @@ fn print_codecs() {
     for codec in rm_codec::codecs() {
         let decode = if codec.can_decode { 'D' } else { '.' };
         let encode = if codec.can_encode { 'E' } else { '.' };
-        println!(" {decode}{encode}.... {:<20} {}", codec.name, codec.long_name);
+        println!(
+            " {decode}{encode}.... {:<20} {}",
+            codec.name, codec.long_name
+        );
     }
 }
 

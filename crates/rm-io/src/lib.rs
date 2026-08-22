@@ -36,7 +36,9 @@ impl<'a> ByteReader<'a> {
 
     pub fn seek(&mut self, position: usize) -> Result<()> {
         if position > self.bytes.len() {
-            return Err(MediaError::invalid_argument("byte reader seek is out of bounds"));
+            return Err(MediaError::invalid_argument(
+                "byte reader seek is out of bounds",
+            ));
         }
         self.position = position;
         Ok(())
@@ -247,7 +249,9 @@ impl<'a> BitReader<'a> {
 
     pub fn read_bits(&mut self, count: u8) -> Result<u64> {
         if count > 64 {
-            return Err(MediaError::invalid_argument("cannot read more than 64 bits"));
+            return Err(MediaError::invalid_argument(
+                "cannot read more than 64 bits",
+            ));
         }
         if usize::from(count) > self.bits_remaining() {
             return Err(MediaError::eof("unexpected end of bitstream"));

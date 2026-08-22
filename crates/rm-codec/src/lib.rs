@@ -142,7 +142,9 @@ pub const fn pcm_wave_format_tag(id: CodecId) -> u16 {
 
 pub fn convert_pcm(input: CodecId, output: CodecId, channels: u16, data: &[u8]) -> Result<Vec<u8>> {
     if channels == 0 {
-        return Err(MediaError::invalid_argument("PCM channel count must be non-zero"));
+        return Err(MediaError::invalid_argument(
+            "PCM channel count must be non-zero",
+        ));
     }
 
     let input_width = pcm_bytes_per_sample(input);
@@ -177,9 +179,7 @@ pub fn convert_pcm(input: CodecId, output: CodecId, channels: u16, data: &[u8]) 
 fn decode_sample(codec: CodecId, bytes: &[u8]) -> f64 {
     match codec {
         CodecId::PcmU8 => (f64::from(bytes[0]) - 128.0) / 128.0,
-        CodecId::PcmS16Le => {
-            f64::from(i16::from_le_bytes([bytes[0], bytes[1]])) / 32_768.0
-        }
+        CodecId::PcmS16Le => f64::from(i16::from_le_bytes([bytes[0], bytes[1]])) / 32_768.0,
         CodecId::PcmS24Le => {
             let extension = if bytes[2] & 0x80 != 0 { 0xFF } else { 0x00 };
             let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], extension]);

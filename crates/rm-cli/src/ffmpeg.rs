@@ -61,7 +61,9 @@ fn run_inner(args: &[OsString]) -> Result<()> {
         ));
     }
     if input == output {
-        return Err(MediaError::invalid_argument("input and output paths must differ"));
+        return Err(MediaError::invalid_argument(
+            "input and output paths must differ",
+        ));
     }
 
     if output.exists() {
@@ -212,9 +214,9 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
             options.codec = if value.eq_ignore_ascii_case("copy") {
                 Some(CodecSelection::Copy)
             } else {
-                Some(CodecSelection::Encode(find_by_name(&value).ok_or_else(|| {
-                    MediaError::unsupported(format!("codec '{value}' is not implemented yet"))
-                })?))
+                Some(CodecSelection::Encode(find_by_name(&value).ok_or_else(
+                    || MediaError::unsupported(format!("codec '{value}' is not implemented yet")),
+                )?))
             };
         } else if is(arg, "-y") {
             options.overwrite = true;
@@ -225,7 +227,9 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
         } else if is(arg, "-v") || is(arg, "-loglevel") {
             index += 1;
             if index >= args.len() {
-                return Err(MediaError::invalid_argument("missing value for loglevel option"));
+                return Err(MediaError::invalid_argument(
+                    "missing value for loglevel option",
+                ));
             }
         } else if arg.to_string_lossy().starts_with('-') {
             return Err(MediaError::unsupported(format!(
@@ -243,7 +247,9 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
     }
 
     if options.overwrite && options.never_overwrite {
-        return Err(MediaError::invalid_argument("-y and -n cannot be used together"));
+        return Err(MediaError::invalid_argument(
+            "-y and -n cannot be used together",
+        ));
     }
 
     Ok(options)
@@ -266,7 +272,9 @@ fn print_help() {
     println!("usage: ffmpeg -i INPUT [OPTIONS] OUTPUT.wav");
     println!("  -i FILE           input file");
     println!("  -c copy           stream-copy the implemented codec");
-    println!("  -c:a CODEC        encode PCM as pcm_u8/pcm_s16le/pcm_s24le/pcm_s32le/pcm_f32le/pcm_f64le");
+    println!(
+        "  -c:a CODEC        encode PCM as pcm_u8/pcm_s16le/pcm_s24le/pcm_s32le/pcm_f32le/pcm_f64le"
+    );
     println!("  -y                 overwrite output without asking");
     println!("  -n                 never overwrite output");
     println!("  -hide_banner       suppress banner");
@@ -303,7 +311,10 @@ mod tests {
             OsString::from("out.wav"),
         ];
         let options = parse_options(&args).unwrap();
-        assert_eq!(options.codec, Some(CodecSelection::Encode(CodecId::PcmF32Le)));
+        assert_eq!(
+            options.codec,
+            Some(CodecSelection::Encode(CodecId::PcmF32Le))
+        );
     }
 
     #[test]

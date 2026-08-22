@@ -164,7 +164,12 @@ pub enum Rounding {
     Nearest,
 }
 
-pub fn rescale(value: i64, source: Rational, destination: Rational, rounding: Rounding) -> Result<i64> {
+pub fn rescale(
+    value: i64,
+    source: Rational,
+    destination: Rational,
+    rounding: Rounding,
+) -> Result<i64> {
     if destination.num == 0 {
         return Err(MediaError::invalid_argument(
             "destination time base numerator must not be zero",
@@ -180,7 +185,9 @@ pub fn rescale(value: i64, source: Rational, destination: Rational, rounding: Ro
         .ok_or_else(|| MediaError::overflow("timestamp rescale denominator overflow"))?;
 
     if denominator == 0 {
-        return Err(MediaError::invalid_argument("invalid zero rescale denominator"));
+        return Err(MediaError::invalid_argument(
+            "invalid zero rescale denominator",
+        ));
     }
 
     let quotient = div_round(numerator, denominator, rounding);
@@ -269,7 +276,9 @@ impl Buffer {
             .checked_add(len)
             .ok_or_else(|| MediaError::overflow("buffer slice overflow"))?;
         if end > self.len {
-            return Err(MediaError::invalid_argument("buffer slice is out of bounds"));
+            return Err(MediaError::invalid_argument(
+                "buffer slice is out of bounds",
+            ));
         }
 
         Ok(Self {
@@ -370,16 +379,25 @@ mod tests {
 
     #[test]
     fn rational_normalizes_sign_and_gcd() {
-        assert_eq!(Rational::new(30, -60).unwrap(), Rational::new(-1, 2).unwrap());
+        assert_eq!(
+            Rational::new(30, -60).unwrap(),
+            Rational::new(-1, 2).unwrap()
+        );
     }
 
     #[test]
     fn rescale_rounds_negative_values_correctly() {
         let source = Rational::new(1, 3).unwrap();
         let destination = Rational::ONE;
-        assert_eq!(rescale(-2, source, destination, Rounding::Down).unwrap(), -1);
+        assert_eq!(
+            rescale(-2, source, destination, Rounding::Down).unwrap(),
+            -1
+        );
         assert_eq!(rescale(-2, source, destination, Rounding::Up).unwrap(), 0);
-        assert_eq!(rescale(-2, source, destination, Rounding::Nearest).unwrap(), -1);
+        assert_eq!(
+            rescale(-2, source, destination, Rounding::Nearest).unwrap(),
+            -1
+        );
     }
 
     #[test]
