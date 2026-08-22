@@ -26,7 +26,7 @@ pub fn probe_png(bytes: &[u8]) -> u8 {
     }
 }
 
-/// Decodes a non-interlaced 8-bit grayscale or RGB PNG image.
+/// Decodes non-interlaced 8-bit grayscale, RGB, gray+alpha, or RGBA PNG images.
 ///
 /// # Errors
 ///
@@ -45,6 +45,8 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
     let mut idat_ended = false;
     let mut saw_iend = false;
     let mut saw_plte = false;
+    let mut palette: Option<Vec<u8>> = None;
+    let mut transparency: Option<Vec<u8>> = None;
 
     while position < bytes.len() {
         if saw_iend {
@@ -110,7 +112,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
                         "PNG contains multiple PLTE chunks",
                     ));
                 }
-                if header.color_type == 0 {
+                if matches!(header.color_type, 0 | 4) {
                     return Err(MediaError::invalid_data(
                         "grayscale PNG must not contain a PLTE chunk",
                     ));
@@ -118,7 +120,59 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
                 if data.is_empty() || data.len() % 3 != 0 || data.len() > 768 {
                     return Err(MediaError::invalid_data("invalid PNG PLTE length"));
                 }
+                let entries = data.len() / 3;
+                if header.color_type == 3 && entries > (1_usize << header.bit_depth) {
+                    return Err(MediaError::invalid_data(
+                        "PNG PLTE has more entries than indexed bit depth permits",
+                    ));
+                }
+                palette = Some(data.to_vec());
                 saw_plte = true;
+            }
+            b"tRNS" => {
+                let header =
+                    ihdr.ok_or_else(|| MediaError::invalid_data("PNG tRNS appeared before IHDR"))?;
+                if saw_idat {
+                    return Err(MediaError::invalid_data("PNG tRNS appeared after IDAT"));
+                }
+                if transparency.is_some() {
+                    return Err(MediaError::invalid_data(
+                        "PNG contains multiple tRNS chunks",
+                    ));
+                }
+                match header.color_type {
+                    0 if data.len() != 2 => {
+                        return Err(MediaError::invalid_data(
+                            "grayscale PNG tRNS length must be 2 bytes",
+                        ));
+                    }
+                    2 if data.len() != 6 => {
+                        return Err(MediaError::invalid_data(
+                            "truecolor PNG tRNS length must be 6 bytes",
+                        ));
+                    }
+                    3 => {
+                        let entries = palette
+                            .as_ref()
+                            .ok_or_else(|| {
+                                MediaError::invalid_data("indexed PNG tRNS requires PLTE")
+                            })?
+                            .len()
+                            / 3;
+                        if data.len() > entries {
+                            return Err(MediaError::invalid_data(
+                                "indexed PNG tRNS has more alpha entries than PLTE",
+                            ));
+                        }
+                    }
+                    4 | 6 => {
+                        return Err(MediaError::invalid_data(
+                            "PNG color types with alpha must not contain tRNS",
+                        ));
+                    }
+                    _ => {}
+                }
+                transparency = Some(data.to_vec());
             }
             b"IDAT" => {
                 if ihdr.is_none() {
@@ -163,10 +217,15 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
         return Err(MediaError::invalid_data("PNG has no IEND chunk"));
     }
     let header = ihdr.ok_or_else(|| MediaError::invalid_data("PNG has no IHDR chunk"))?;
-    decode_scanlines(header, &idat)
+    if header.color_type == 3 && palette.is_none() {
+        return Err(MediaError::invalid_data(
+            "indexed PNG requires a PLTE chunk",
+        ));
+    }
+    decode_scanlines(header, &idat, palette.as_deref(), transparency.as_deref())
 }
 
-/// Encodes an 8-bit grayscale or RGB frame as a non-interlaced PNG.
+/// Encodes an 8-bit grayscale, RGB, gray+alpha, or RGBA frame as a non-interlaced PNG.
 ///
 /// The baseline encoder emits filter type 0 scanlines and repository-owned zlib
 /// stored blocks. This is standards-compliant but intentionally not yet size
@@ -179,6 +238,8 @@ pub fn encode_png(frame: &VideoFrame) -> Result<Vec<u8>> {
     let color_type = match frame.format {
         PixelFormat::Gray8 => 0_u8,
         PixelFormat::Rgb24 => 2_u8,
+        PixelFormat::GrayAlpha8 => 4_u8,
+        PixelFormat::Rgba32 => 6_u8,
     };
     let stride = frame
         .format
@@ -247,7 +308,7 @@ fn parse_ihdr(data: &[u8]) -> Result<Ihdr> {
             header.bit_depth
         )));
     }
-    if !matches!(header.color_type, 0 | 2) {
+    if !matches!(header.color_type, 0 | 2 | 3 | 4 | 6) {
         return Err(MediaError::unsupported(format!(
             "PNG color type {} is not implemented yet",
             header.color_type
@@ -269,10 +330,21 @@ fn parse_ihdr(data: &[u8]) -> Result<Ihdr> {
     Ok(header)
 }
 
-fn decode_scanlines(header: Ihdr, compressed: &[u8]) -> Result<VideoFrame> {
+fn decode_scanlines(
+    header: Ihdr,
+    compressed: &[u8],
+    palette: Option<&[u8]>,
+    transparency: Option<&[u8]>,
+) -> Result<VideoFrame> {
+    if header.color_type == 3 {
+        return decode_indexed_scanlines(header, compressed, palette, transparency);
+    }
+
     let (format, bytes_per_pixel) = match header.color_type {
         0 => (PixelFormat::Gray8, 1_usize),
         2 => (PixelFormat::Rgb24, 3_usize),
+        4 => (PixelFormat::GrayAlpha8, 2_usize),
+        6 => (PixelFormat::Rgba32, 4_usize),
         _ => return Err(MediaError::unsupported("unsupported PNG color type")),
     };
     let width = usize::try_from(header.width)
@@ -316,6 +388,79 @@ fn decode_scanlines(header: Ihdr, compressed: &[u8]) -> Result<VideoFrame> {
     }
 
     VideoFrame::from_vec(header.width, header.height, format, pixels)
+}
+
+fn decode_indexed_scanlines(
+    header: Ihdr,
+    compressed: &[u8],
+    palette: Option<&[u8]>,
+    transparency: Option<&[u8]>,
+) -> Result<VideoFrame> {
+    let palette = palette.ok_or_else(|| MediaError::invalid_data("indexed PNG requires PLTE"))?;
+    let palette_entries = palette.len() / 3;
+    let width = usize::try_from(header.width)
+        .map_err(|_| MediaError::overflow("PNG width exceeds usize"))?;
+    let height = usize::try_from(header.height)
+        .map_err(|_| MediaError::overflow("PNG height exceeds usize"))?;
+    let encoded_row = width
+        .checked_add(1)
+        .ok_or_else(|| MediaError::overflow("PNG indexed row size overflow"))?;
+    let expected_size = encoded_row
+        .checked_mul(height)
+        .ok_or_else(|| MediaError::overflow("PNG indexed decompressed size overflow"))?;
+    let filtered = zlib::decompress(compressed, expected_size)?;
+    if filtered.len() != expected_size {
+        return Err(MediaError::invalid_data(format!(
+            "PNG decompressed data has {} bytes but {expected_size} are required",
+            filtered.len()
+        )));
+    }
+
+    let index_count = width
+        .checked_mul(height)
+        .ok_or_else(|| MediaError::overflow("PNG indexed pixel count overflow"))?;
+    let mut indices = vec![0_u8; index_count];
+    for row_index in 0..height {
+        let encoded_start = row_index * encoded_row;
+        let filter = filtered[encoded_start];
+        let raw = &filtered[encoded_start + 1..encoded_start + encoded_row];
+        let output_start = row_index * width;
+        let (before, current_and_after) = indices.split_at_mut(output_start);
+        let current = &mut current_and_after[..width];
+        let previous = if row_index == 0 {
+            None
+        } else {
+            Some(&before[before.len() - width..])
+        };
+        unfilter_row(filter, raw, current, previous, 1)?;
+    }
+
+    let has_alpha = transparency.is_some();
+    let format = if has_alpha {
+        PixelFormat::Rgba32
+    } else {
+        PixelFormat::Rgb24
+    };
+    let channels = format.bytes_per_pixel();
+    let output_len = index_count
+        .checked_mul(channels)
+        .ok_or_else(|| MediaError::overflow("PNG indexed expansion size overflow"))?;
+    let mut output = Vec::with_capacity(output_len);
+    for index in indices {
+        let entry = usize::from(index);
+        if entry >= palette_entries {
+            return Err(MediaError::invalid_data(format!(
+                "PNG palette index {entry} exceeds PLTE entry count {palette_entries}"
+            )));
+        }
+        let offset = entry * 3;
+        output.extend_from_slice(&palette[offset..offset + 3]);
+        if let Some(alpha) = transparency {
+            output.push(alpha.get(entry).copied().unwrap_or(255));
+        }
+    }
+
+    VideoFrame::from_vec(header.width, header.height, format, output)
 }
 
 fn unfilter_row(

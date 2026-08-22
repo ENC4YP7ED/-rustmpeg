@@ -8,15 +8,58 @@ pub fn convert_pixel_format(frame: &VideoFrame, target: PixelFormat) -> Result<V
         return Ok(frame.clone());
     }
 
-    match (frame.format, target) {
-        (PixelFormat::Gray8, PixelFormat::Rgb24) => gray_to_rgb(frame),
-        (PixelFormat::Rgb24, PixelFormat::Gray8) => rgb_to_gray(frame),
-        _ => Err(MediaError::unsupported(format!(
-            "pixel conversion {} -> {} is not implemented",
-            frame.format.name(),
-            target.name()
-        ))),
+    let pixel_count = usize::try_from(frame.pixel_count())
+        .map_err(|_| MediaError::overflow("pixel conversion size exceeds usize"))?;
+    let output_len = pixel_count
+        .checked_mul(target.bytes_per_pixel())
+        .ok_or_else(|| MediaError::overflow("pixel conversion output size overflow"))?;
+    let mut output = Vec::with_capacity(output_len);
+
+    for index in 0..pixel_count {
+        let (gray, red, green, blue, alpha) = read_pixel(frame, index)?;
+        match target {
+            PixelFormat::Gray8 => output.push(gray),
+            PixelFormat::GrayAlpha8 => output.extend_from_slice(&[gray, alpha]),
+            PixelFormat::Rgb24 => output.extend_from_slice(&[red, green, blue]),
+            PixelFormat::Rgba32 => output.extend_from_slice(&[red, green, blue, alpha]),
+        }
     }
+
+    VideoFrame::from_vec(frame.width, frame.height, target, output)
+}
+
+fn read_pixel(frame: &VideoFrame, index: usize) -> Result<(u8, u8, u8, u8, u8)> {
+    let offset = index
+        .checked_mul(frame.format.bytes_per_pixel())
+        .ok_or_else(|| MediaError::overflow("pixel conversion source offset overflow"))?;
+    let data = frame.data.as_slice();
+    let pixel = data
+        .get(offset..offset + frame.format.bytes_per_pixel())
+        .ok_or_else(|| MediaError::invalid_data("pixel conversion source frame is truncated"))?;
+
+    Ok(match frame.format {
+        PixelFormat::Gray8 => {
+            let gray = pixel[0];
+            (gray, gray, gray, gray, 255)
+        }
+        PixelFormat::GrayAlpha8 => {
+            let gray = pixel[0];
+            (gray, gray, gray, gray, pixel[1])
+        }
+        PixelFormat::Rgb24 => {
+            let gray = luma(pixel[0], pixel[1], pixel[2])?;
+            (gray, pixel[0], pixel[1], pixel[2], 255)
+        }
+        PixelFormat::Rgba32 => {
+            let gray = luma(pixel[0], pixel[1], pixel[2])?;
+            (gray, pixel[0], pixel[1], pixel[2], pixel[3])
+        }
+    })
+}
+
+fn luma(red: u8, green: u8, blue: u8) -> Result<u8> {
+    let value = (77 * u32::from(red) + 150 * u32::from(green) + 29 * u32::from(blue) + 128) >> 8;
+    u8::try_from(value).map_err(|_| MediaError::overflow("computed luma exceeds u8"))
 }
 
 pub fn scale_nearest(frame: &VideoFrame, width: u32, height: u32) -> Result<VideoFrame> {
@@ -91,36 +134,6 @@ pub fn convert_and_scale(
     scale_nearest(&converted, width, height)
 }
 
-fn gray_to_rgb(frame: &VideoFrame) -> Result<VideoFrame> {
-    let capacity = frame
-        .data
-        .len()
-        .checked_mul(3)
-        .ok_or_else(|| MediaError::overflow("RGB conversion size overflow"))?;
-    let mut output = Vec::with_capacity(capacity);
-    for &value in frame.data.as_slice() {
-        output.extend_from_slice(&[value, value, value]);
-    }
-    VideoFrame::from_vec(frame.width, frame.height, PixelFormat::Rgb24, output)
-}
-
-fn rgb_to_gray(frame: &VideoFrame) -> Result<VideoFrame> {
-    let mut output = Vec::with_capacity(
-        usize::try_from(frame.pixel_count())
-            .map_err(|_| MediaError::overflow("gray conversion size exceeds usize"))?,
-    );
-    for pixel in frame.data.as_slice().chunks_exact(3) {
-        let red = u32::from(pixel[0]);
-        let green = u32::from(pixel[1]);
-        let blue = u32::from(pixel[2]);
-        let luma = (77 * red + 150 * green + 29 * blue + 128) >> 8;
-        output.push(
-            u8::try_from(luma).map_err(|_| MediaError::overflow("computed luma exceeds u8"))?,
-        );
-    }
-    VideoFrame::from_vec(frame.width, frame.height, PixelFormat::Gray8, output)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +156,42 @@ mod tests {
         .unwrap();
         let gray = convert_pixel_format(&frame, PixelFormat::Gray8).unwrap();
         assert_eq!(gray.data.as_slice(), &[77, 149, 29]);
+    }
+
+    #[test]
+    fn alpha_is_preserved_when_target_supports_it() {
+        let frame = VideoFrame::from_vec(
+            2,
+            1,
+            PixelFormat::Rgba32,
+            vec![255, 0, 0, 17, 0, 255, 0, 231],
+        )
+        .unwrap();
+        let gray_alpha = convert_pixel_format(&frame, PixelFormat::GrayAlpha8).unwrap();
+        assert_eq!(gray_alpha.data.as_slice(), &[77, 17, 149, 231]);
+        let round_trip = convert_pixel_format(&gray_alpha, PixelFormat::Rgba32).unwrap();
+        assert_eq!(
+            round_trip.data.as_slice(),
+            &[77, 77, 77, 17, 149, 149, 149, 231]
+        );
+    }
+
+    #[test]
+    fn opaque_alpha_is_inserted_for_non_alpha_sources() {
+        let frame = VideoFrame::from_vec(1, 1, PixelFormat::Rgb24, vec![1, 2, 3]).unwrap();
+        let rgba = convert_pixel_format(&frame, PixelFormat::Rgba32).unwrap();
+        assert_eq!(rgba.data.as_slice(), &[1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn nearest_scale_preserves_rgba_pixels() {
+        let frame =
+            VideoFrame::from_vec(2, 1, PixelFormat::Rgba32, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+        let scaled = scale_nearest(&frame, 4, 1).unwrap();
+        assert_eq!(
+            scaled.data.as_slice(),
+            &[1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 5, 6, 7, 8]
+        );
     }
 
     #[test]

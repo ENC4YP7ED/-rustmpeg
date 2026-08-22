@@ -42,9 +42,11 @@ pub fn decode_tga(bytes: &[u8]) -> Result<VideoFrame> {
 
     let depth = bytes[16];
     let (format, bytes_per_pixel, rle) = match (image_type, depth) {
-        (TYPE_TRUECOLOR, 24 | 32) => (PixelFormat::Rgb24, usize::from(depth / 8), false),
+        (TYPE_TRUECOLOR, 24) => (PixelFormat::Rgb24, 3, false),
+        (TYPE_TRUECOLOR, 32) => (PixelFormat::Rgba32, 4, false),
         (TYPE_GRAYSCALE, 8) => (PixelFormat::Gray8, 1, false),
-        (TYPE_RLE_TRUECOLOR, 24 | 32) => (PixelFormat::Rgb24, usize::from(depth / 8), true),
+        (TYPE_RLE_TRUECOLOR, 24) => (PixelFormat::Rgb24, 3, true),
+        (TYPE_RLE_TRUECOLOR, 32) => (PixelFormat::Rgba32, 4, true),
         (TYPE_RLE_GRAYSCALE, 8) => (PixelFormat::Gray8, 1, true),
         (TYPE_TRUECOLOR | TYPE_RLE_TRUECOLOR, _) => {
             return Err(MediaError::unsupported(format!(
@@ -122,12 +124,20 @@ pub fn decode_tga(bytes: &[u8]) -> Result<VideoFrame> {
             .checked_mul(bytes_per_pixel)
             .ok_or_else(|| MediaError::overflow("TGA source pixel offset overflow"))?;
 
-        if format == PixelFormat::Gray8 {
-            output[destination_index] = source[source_index];
-        } else {
-            output[destination_index] = source[source_index + 2];
-            output[destination_index + 1] = source[source_index + 1];
-            output[destination_index + 2] = source[source_index];
+        match format {
+            PixelFormat::Gray8 => output[destination_index] = source[source_index],
+            PixelFormat::Rgb24 => {
+                output[destination_index] = source[source_index + 2];
+                output[destination_index + 1] = source[source_index + 1];
+                output[destination_index + 2] = source[source_index];
+            }
+            PixelFormat::Rgba32 => {
+                output[destination_index] = source[source_index + 2];
+                output[destination_index + 1] = source[source_index + 1];
+                output[destination_index + 2] = source[source_index];
+                output[destination_index + 3] = source[source_index + 3];
+            }
+            PixelFormat::GrayAlpha8 => unreachable!("TGA decoder does not produce gray+alpha"),
         }
     }
 
@@ -158,6 +168,20 @@ pub fn encode_tga_with_rle(frame: &VideoFrame, rle: bool) -> Result<Vec<u8>> {
             24_u8,
             3_usize,
         ),
+        PixelFormat::Rgba32 => (
+            if rle {
+                TYPE_RLE_TRUECOLOR
+            } else {
+                TYPE_TRUECOLOR
+            },
+            32_u8,
+            4_usize,
+        ),
+        PixelFormat::GrayAlpha8 => {
+            return Err(MediaError::unsupported(
+                "TGA gray+alpha encoding is not representable by the implemented TGA surface",
+            ));
+        }
     };
     let width = u16::try_from(frame.width)
         .map_err(|_| MediaError::unsupported("TGA width exceeds 65535 pixels"))?;
@@ -177,6 +201,12 @@ pub fn encode_tga_with_rle(frame: &VideoFrame, rle: bool) -> Result<Vec<u8>> {
                 raw.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
             }
         }
+        PixelFormat::Rgba32 => {
+            for pixel in frame.data.as_slice().chunks_exact(4) {
+                raw.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+            }
+        }
+        PixelFormat::GrayAlpha8 => unreachable!("rejected before raster conversion"),
     }
 
     let raster = if rle {
@@ -198,7 +228,11 @@ pub fn encode_tga_with_rle(frame: &VideoFrame, rle: bool) -> Result<Vec<u8>> {
     output.extend_from_slice(&width.to_le_bytes());
     output.extend_from_slice(&height.to_le_bytes());
     output.push(depth);
-    output.push(0x20);
+    output.push(if frame.format == PixelFormat::Rgba32 {
+        0x28
+    } else {
+        0x20
+    });
     output.extend_from_slice(&raster);
     Ok(output)
 }
