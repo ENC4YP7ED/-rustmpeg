@@ -40,10 +40,19 @@ impl ImagePattern {
     }
 
     pub fn collect_existing(&self, start_number: i64, limit: Option<usize>) -> Result<Vec<PathBuf>> {
-        let limit = limit.unwrap_or(DEFAULT_SCAN_LIMIT);
-        if limit == 0 || limit > DEFAULT_SCAN_LIMIT {
+        self.collect_existing_in_range(start_number, 1, limit)
+    }
+
+    pub fn collect_existing_in_range(
+        &self,
+        start_number: i64,
+        start_number_range: usize,
+        limit: Option<usize>,
+    ) -> Result<Vec<PathBuf>> {
+        let limit = validate_limit(limit)?;
+        if start_number_range == 0 || start_number_range > DEFAULT_SCAN_LIMIT {
             return Err(MediaError::invalid_argument(format!(
-                "image2 scan limit must be in 1..={DEFAULT_SCAN_LIMIT}"
+                "image2 start-number range must be in 1..={DEFAULT_SCAN_LIMIT}"
             )));
         }
 
@@ -58,11 +67,12 @@ impl ImagePattern {
                 Ok(vec![path.clone()])
             }
             Self::Numbered(_) => {
+                let first = self.find_first(start_number, start_number_range)?;
                 let mut paths = Vec::new();
                 for offset in 0..limit {
                     let offset = i64::try_from(offset)
                         .map_err(|_| MediaError::overflow("image2 sequence offset exceeds i64"))?;
-                    let number = start_number
+                    let number = first
                         .checked_add(offset)
                         .ok_or_else(|| MediaError::overflow("image2 frame number overflow"))?;
                     let path = self.path_for(number)?;
@@ -73,15 +83,43 @@ impl ImagePattern {
                         Err(error) => return Err(error.into()),
                     }
                 }
-                if paths.is_empty() {
-                    return Err(MediaError::invalid_argument(format!(
-                        "no image2 frames found starting at {start_number}"
-                    )));
-                }
                 Ok(paths)
             }
         }
     }
+
+    fn find_first(&self, start_number: i64, range: usize) -> Result<i64> {
+        for offset in 0..range {
+            let offset = i64::try_from(offset)
+                .map_err(|_| MediaError::overflow("image2 start offset exceeds i64"))?;
+            let number = start_number
+                .checked_add(offset)
+                .ok_or_else(|| MediaError::overflow("image2 start number overflow"))?;
+            let path = self.path_for(number)?;
+            match fs::metadata(&path) {
+                Ok(metadata) if metadata.is_file() => return Ok(number),
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(MediaError::invalid_argument(format!(
+            "no image2 frame found in start range {start_number}..{}",
+            start_number
+                .checked_add(i64::try_from(range - 1).unwrap_or(i64::MAX))
+                .unwrap_or(i64::MAX)
+        )))
+    }
+}
+
+fn validate_limit(limit: Option<usize>) -> Result<usize> {
+    let limit = limit.unwrap_or(DEFAULT_SCAN_LIMIT);
+    if limit == 0 || limit > DEFAULT_SCAN_LIMIT {
+        return Err(MediaError::invalid_argument(format!(
+            "image2 scan limit must be in 1..={DEFAULT_SCAN_LIMIT}"
+        )));
+    }
+    Ok(limit)
 }
 
 fn count_placeholders(template: &str) -> Result<usize> {
@@ -241,6 +279,20 @@ mod tests {
         assert_eq!(paths.len(), 2);
         assert!(paths[0].ends_with("f-001.ppm"));
         assert!(paths[1].ends_with("f-002.ppm"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn start_number_range_finds_first_available_frame() {
+        let dir = temp_dir("range");
+        fs::write(dir.join("f-003.ppm"), b"x").unwrap();
+        fs::write(dir.join("f-004.ppm"), b"x").unwrap();
+        let pattern = ImagePattern::parse(&dir.join("f-%03d.ppm")).unwrap();
+        let paths = pattern
+            .collect_existing_in_range(0, 5, Some(10))
+            .unwrap();
+        assert_eq!(paths.len(), 2);
+        assert!(paths[0].ends_with("f-003.ppm"));
         fs::remove_dir_all(dir).unwrap();
     }
 }
