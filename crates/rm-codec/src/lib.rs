@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+use rm_core::{MediaError, Result};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MediaType {
     Video,
@@ -94,6 +96,14 @@ pub fn descriptor(id: CodecId) -> &'static CodecDescriptor {
 }
 
 #[must_use]
+pub fn find_by_name(name: &str) -> Option<CodecId> {
+    PCM_CODECS
+        .iter()
+        .find(|descriptor| descriptor.name.eq_ignore_ascii_case(name))
+        .map(|descriptor| descriptor.id)
+}
+
+#[must_use]
 pub const fn pcm_from_wave_tag(format_tag: u16, bits_per_sample: u16) -> Option<CodecId> {
     match (format_tag, bits_per_sample) {
         (1, 8) => Some(CodecId::PcmU8),
@@ -118,11 +128,126 @@ pub const fn pcm_bits_per_sample(id: CodecId) -> u16 {
 }
 
 #[must_use]
+pub const fn pcm_bytes_per_sample(id: CodecId) -> usize {
+    (pcm_bits_per_sample(id) / 8) as usize
+}
+
+#[must_use]
 pub const fn pcm_wave_format_tag(id: CodecId) -> u16 {
     match id {
         CodecId::PcmF32Le | CodecId::PcmF64Le => 3,
         CodecId::PcmU8 | CodecId::PcmS16Le | CodecId::PcmS24Le | CodecId::PcmS32Le => 1,
     }
+}
+
+pub fn convert_pcm(input: CodecId, output: CodecId, channels: u16, data: &[u8]) -> Result<Vec<u8>> {
+    if channels == 0 {
+        return Err(MediaError::invalid_argument("PCM channel count must be non-zero"));
+    }
+    if input == output {
+        return Ok(data.to_vec());
+    }
+
+    let input_width = pcm_bytes_per_sample(input);
+    let output_width = pcm_bytes_per_sample(output);
+    let input_frame_size = input_width
+        .checked_mul(usize::from(channels))
+        .ok_or_else(|| MediaError::overflow("PCM input frame size overflow"))?;
+    if data.len() % input_frame_size != 0 {
+        return Err(MediaError::invalid_data(
+            "PCM input does not contain complete interleaved sample frames",
+        ));
+    }
+
+    let sample_count = data.len() / input_width;
+    let output_size = sample_count
+        .checked_mul(output_width)
+        .ok_or_else(|| MediaError::overflow("PCM output size overflow"))?;
+    let mut converted = Vec::with_capacity(output_size);
+
+    for sample in data.chunks_exact(input_width) {
+        let normalized = decode_sample(input, sample);
+        encode_sample(output, normalized, &mut converted);
+    }
+
+    Ok(converted)
+}
+
+fn decode_sample(codec: CodecId, bytes: &[u8]) -> f64 {
+    match codec {
+        CodecId::PcmU8 => (f64::from(bytes[0]) - 128.0) / 128.0,
+        CodecId::PcmS16Le => {
+            f64::from(i16::from_le_bytes([bytes[0], bytes[1]])) / 32_768.0
+        }
+        CodecId::PcmS24Le => {
+            let extension = if bytes[2] & 0x80 != 0 { 0xFF } else { 0x00 };
+            let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], extension]);
+            f64::from(value) / 8_388_608.0
+        }
+        CodecId::PcmS32Le => {
+            let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            f64::from(value) / 2_147_483_648.0
+        }
+        CodecId::PcmF32Le => {
+            let value = f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            f64::from(value)
+        }
+        CodecId::PcmF64Le => f64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]),
+    }
+}
+
+fn encode_sample(codec: CodecId, sample: f64, output: &mut Vec<u8>) {
+    match codec {
+        CodecId::PcmU8 => {
+            let sample = sanitize(sample).clamp(-1.0, 1.0);
+            let value = if sample >= 1.0 {
+                255
+            } else if sample <= -1.0 {
+                0
+            } else {
+                (sample.mul_add(128.0, 128.0).round() as i64).clamp(0, 255) as u8
+            };
+            output.push(value);
+        }
+        CodecId::PcmS16Le => {
+            let value = quantize_signed(sample, 32_768.0, i64::from(i16::MIN), i64::from(i16::MAX));
+            output.extend_from_slice(&(value as i16).to_le_bytes());
+        }
+        CodecId::PcmS24Le => {
+            let value = quantize_signed(sample, 8_388_608.0, -8_388_608, 8_388_607) as i32;
+            let bytes = value.to_le_bytes();
+            output.extend_from_slice(&bytes[..3]);
+        }
+        CodecId::PcmS32Le => {
+            let value = quantize_signed(
+                sample,
+                2_147_483_648.0,
+                i64::from(i32::MIN),
+                i64::from(i32::MAX),
+            );
+            output.extend_from_slice(&(value as i32).to_le_bytes());
+        }
+        CodecId::PcmF32Le => output.extend_from_slice(&(sanitize(sample) as f32).to_le_bytes()),
+        CodecId::PcmF64Le => output.extend_from_slice(&sanitize(sample).to_le_bytes()),
+    }
+}
+
+fn sanitize(sample: f64) -> f64 {
+    if sample.is_finite() { sample } else { 0.0 }
+}
+
+fn quantize_signed(sample: f64, scale: f64, minimum: i64, maximum: i64) -> i64 {
+    let sample = sanitize(sample).clamp(-1.0, 1.0);
+    let quantized = if sample <= -1.0 {
+        minimum
+    } else if sample >= 1.0 {
+        maximum
+    } else {
+        (sample * scale).round() as i64
+    };
+    quantized.clamp(minimum, maximum)
 }
 
 #[cfg(test)]
@@ -143,5 +268,38 @@ mod tests {
             assert!(codec.can_decode);
             assert!(codec.can_encode);
         }
+    }
+
+    #[test]
+    fn identical_pcm_conversion_is_bit_exact() {
+        let source = [0x00, 0x80, 0xFF, 0x7F];
+        assert_eq!(
+            convert_pcm(CodecId::PcmS16Le, CodecId::PcmS16Le, 1, &source).unwrap(),
+            source
+        );
+    }
+
+    #[test]
+    fn signed_sixteen_converts_to_unsigned_eight() {
+        let mut source = Vec::new();
+        source.extend_from_slice(&i16::MIN.to_le_bytes());
+        source.extend_from_slice(&0_i16.to_le_bytes());
+        source.extend_from_slice(&i16::MAX.to_le_bytes());
+        let converted = convert_pcm(CodecId::PcmS16Le, CodecId::PcmU8, 1, &source).unwrap();
+        assert_eq!(converted, [0, 128, 255]);
+    }
+
+    #[test]
+    fn float_to_integer_clips_and_sanitizes() {
+        let mut source = Vec::new();
+        source.extend_from_slice(&(-2.0_f32).to_le_bytes());
+        source.extend_from_slice(&f32::NAN.to_le_bytes());
+        source.extend_from_slice(&(2.0_f32).to_le_bytes());
+        let converted = convert_pcm(CodecId::PcmF32Le, CodecId::PcmS16Le, 1, &source).unwrap();
+        let values: Vec<i16> = converted
+            .chunks_exact(2)
+            .map(|bytes| i16::from_le_bytes([bytes[0], bytes[1]]))
+            .collect();
+        assert_eq!(values, [i16::MIN, 0, i16::MAX]);
     }
 }
