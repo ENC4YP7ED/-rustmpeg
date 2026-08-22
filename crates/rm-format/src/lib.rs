@@ -26,7 +26,7 @@ const FORMATS: [FormatDescriptor; 2] = [
     FormatDescriptor {
         name: "image2",
         long_name: "image2 sequence",
-        extensions: &["pbm", "pgm", "ppm", "pnm"],
+        extensions: &["pbm", "pgm", "ppm", "pnm", "bmp", "dib", "tga", "targa"],
         can_demux: true,
         can_mux: true,
     },
