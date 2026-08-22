@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/rm-core",
+    "crates/rm-io",
+    "crates/rm-codec",
+    "crates/rm-format",
+    "crates/rm-cli",
+    "apps/ffmpeg",
+    "apps/ffprobe",
+    "apps/ffplay",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.98"
+authors = ["ENC4YP7ED"]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

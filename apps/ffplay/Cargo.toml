@@ -1,0 +1,15 @@
+[package]
+name = "rustmpeg-ffplay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ffplay"
+path = "src/main.rs"
+
+[dependencies]
+rm-cli = { path = "../../crates/rm-cli" }
+
+[lints]
+workspace = true
