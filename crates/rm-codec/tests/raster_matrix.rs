@@ -30,9 +30,8 @@ fn bmp_multiline_round_trip_preserves_logical_top_left_order() {
         3,
         3,
         vec![
-            1, 2, 3, 4, 5, 6, 7, 8, 9,
-            10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22, 23, 24, 25, 26, 27,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27,
         ],
     );
     assert_eq!(decode_bmp(&encode_bmp(&frame).unwrap()).unwrap(), frame);
@@ -122,13 +121,8 @@ fn tga_32_bit_alpha_is_ignored_but_rgb_is_preserved() {
 
 #[test]
 fn tga_grayscale_rle_round_trip_handles_mixed_packets() {
-    let frame = VideoFrame::from_vec(
-        8,
-        1,
-        PixelFormat::Gray8,
-        vec![1, 1, 1, 2, 3, 4, 4, 4],
-    )
-    .unwrap();
+    let frame =
+        VideoFrame::from_vec(8, 1, PixelFormat::Gray8, vec![1, 1, 1, 2, 3, 4, 4, 4]).unwrap();
     let encoded = encode_tga_with_rle(&frame, true).unwrap();
     assert_eq!(encoded[2], 11);
     assert_eq!(decode_tga(&encoded).unwrap(), frame);

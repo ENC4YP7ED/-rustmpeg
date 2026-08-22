@@ -14,14 +14,17 @@ pub fn probe_tga(bytes: &[u8]) -> u8 {
     }
     let image_type = bytes[2];
     let depth = bytes[16];
-    let valid = matches!(image_type, TYPE_TRUECOLOR | TYPE_RLE_TRUECOLOR) && matches!(depth, 24 | 32)
+    let valid = matches!(image_type, TYPE_TRUECOLOR | TYPE_RLE_TRUECOLOR)
+        && matches!(depth, 24 | 32)
         || matches!(image_type, TYPE_GRAYSCALE | TYPE_RLE_GRAYSCALE) && depth == 8;
     if valid { 75 } else { 0 }
 }
 
 pub fn decode_tga(bytes: &[u8]) -> Result<VideoFrame> {
     if bytes.len() < HEADER_SIZE {
-        return Err(MediaError::invalid_data("TGA input is shorter than its 18-byte header"));
+        return Err(MediaError::invalid_data(
+            "TGA input is shorter than its 18-byte header",
+        ));
     }
     if bytes[1] != 0 {
         return Err(MediaError::unsupported(
@@ -92,10 +95,10 @@ pub fn decode_tga(bytes: &[u8]) -> Result<VideoFrame> {
     let descriptor = bytes[17];
     let right_origin = descriptor & 0x10 != 0;
     let top_origin = descriptor & 0x20 != 0;
-    let width_usize = usize::try_from(width)
-        .map_err(|_| MediaError::overflow("TGA width exceeds usize"))?;
-    let height_usize = usize::try_from(height)
-        .map_err(|_| MediaError::overflow("TGA height exceeds usize"))?;
+    let width_usize =
+        usize::try_from(width).map_err(|_| MediaError::overflow("TGA width exceeds usize"))?;
+    let height_usize =
+        usize::try_from(height).map_err(|_| MediaError::overflow("TGA height exceeds usize"))?;
 
     for file_index in 0..pixel_count {
         let file_y = file_index / width_usize;
@@ -138,12 +141,20 @@ pub fn encode_tga(frame: &VideoFrame) -> Result<Vec<u8>> {
 pub fn encode_tga_with_rle(frame: &VideoFrame, rle: bool) -> Result<Vec<u8>> {
     let (image_type, depth, source_channels) = match frame.format {
         PixelFormat::Gray8 => (
-            if rle { TYPE_RLE_GRAYSCALE } else { TYPE_GRAYSCALE },
+            if rle {
+                TYPE_RLE_GRAYSCALE
+            } else {
+                TYPE_GRAYSCALE
+            },
             8_u8,
             1_usize,
         ),
         PixelFormat::Rgb24 => (
-            if rle { TYPE_RLE_TRUECOLOR } else { TYPE_TRUECOLOR },
+            if rle {
+                TYPE_RLE_TRUECOLOR
+            } else {
+                TYPE_TRUECOLOR
+            },
             24_u8,
             3_usize,
         ),
@@ -350,9 +361,7 @@ mod tests {
             6,
             1,
             PixelFormat::Rgb24,
-            vec![
-                1, 2, 3, 1, 2, 3, 1, 2, 3, 9, 8, 7, 6, 5, 4, 6, 5, 4,
-            ],
+            vec![1, 2, 3, 1, 2, 3, 1, 2, 3, 9, 8, 7, 6, 5, 4, 6, 5, 4],
         )
         .unwrap();
         let encoded = encode_tga_with_rle(&frame, true).unwrap();

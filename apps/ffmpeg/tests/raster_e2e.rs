@@ -42,10 +42,7 @@ fn ppm_to_bmp_and_back_preserves_pixels_and_emits_canonical_header() {
     let source = dir.join("source.ppm");
     let bmp = dir.join("image.bmp");
     let restored = dir.join("restored.ppm");
-    let pixels = [
-        255, 0, 0, 0, 255, 0,
-        0, 0, 255, 255, 255, 255,
-    ];
+    let pixels = [255, 0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255];
     let expected = ppm(&pixels, 2, 2);
     fs::write(&source, &expected).unwrap();
 
@@ -61,8 +58,14 @@ fn ppm_to_bmp_and_back_preserves_pixels_and_emits_canonical_header() {
 
     let bmp_bytes = fs::read(&bmp).unwrap();
     assert_eq!(&bmp_bytes[0..2], b"BM");
-    assert_eq!(u32::from_le_bytes(bmp_bytes[10..14].try_into().unwrap()), 54);
-    assert_eq!(u16::from_le_bytes(bmp_bytes[28..30].try_into().unwrap()), 24);
+    assert_eq!(
+        u32::from_le_bytes(bmp_bytes[10..14].try_into().unwrap()),
+        54
+    );
+    assert_eq!(
+        u16::from_le_bytes(bmp_bytes[28..30].try_into().unwrap()),
+        24
+    );
 
     let decoded = ffmpeg()
         .arg("-hide_banner")

@@ -86,7 +86,11 @@ fn bmp_reports_typed_video_metadata() {
         .arg(&input)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("codec_name=bmp"));
     assert!(stdout.contains("codec_type=video"));
@@ -110,7 +114,11 @@ fn targa_reports_typed_video_metadata() {
         .arg(&input)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("codec_name=targa"));
     assert!(stdout.contains("codec_type=video"));

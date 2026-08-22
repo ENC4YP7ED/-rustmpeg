@@ -122,14 +122,13 @@ pub fn decode_bmp(bytes: &[u8]) -> Result<VideoFrame> {
         .checked_mul(3)
         .ok_or_else(|| MediaError::overflow("BMP output stride overflow"))?;
 
-    for output_y in 0..usize::try_from(height)
-        .map_err(|_| MediaError::overflow("BMP height exceeds usize"))?
+    for output_y in
+        0..usize::try_from(height).map_err(|_| MediaError::overflow("BMP height exceeds usize"))?
     {
         let source_y = if top_down {
             output_y
         } else {
-            usize::try_from(height)
-                .map_err(|_| MediaError::overflow("BMP height exceeds usize"))?
+            usize::try_from(height).map_err(|_| MediaError::overflow("BMP height exceeds usize"))?
                 - 1
                 - output_y
         };
