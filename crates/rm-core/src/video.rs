@@ -3,7 +3,9 @@ use crate::{Buffer, MediaError, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PixelFormat {
     Gray8,
+    GrayAlpha8,
     Rgb24,
+    Rgba32,
 }
 
 impl PixelFormat {
@@ -11,7 +13,9 @@ impl PixelFormat {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Gray8 => "gray",
+            Self::GrayAlpha8 => "ya8",
             Self::Rgb24 => "rgb24",
+            Self::Rgba32 => "rgba",
         }
     }
 
@@ -19,7 +23,9 @@ impl PixelFormat {
     pub const fn bytes_per_pixel(self) -> usize {
         match self {
             Self::Gray8 => 1,
+            Self::GrayAlpha8 => 2,
             Self::Rgb24 => 3,
+            Self::Rgba32 => 4,
         }
     }
 
@@ -115,15 +121,31 @@ mod tests {
     }
 
     #[test]
+    fn packed_alpha_frames_validate_exact_storage() {
+        let gray_alpha = VideoFrame::from_vec(2, 1, PixelFormat::GrayAlpha8, vec![7, 8, 9, 10])
+            .unwrap();
+        assert_eq!(gray_alpha.linesize, 4);
+        assert_eq!(gray_alpha.row(0).unwrap(), &[7, 8, 9, 10]);
+
+        let rgba = VideoFrame::from_vec(2, 1, PixelFormat::Rgba32, vec![1, 2, 3, 4, 5, 6, 7, 8])
+            .unwrap();
+        assert_eq!(rgba.linesize, 8);
+        assert_eq!(rgba.row(0).unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
     fn packed_row_size_is_checked() {
         assert_eq!(PixelFormat::Gray8.packed_row_bytes(4), Some(4));
+        assert_eq!(PixelFormat::GrayAlpha8.packed_row_bytes(4), Some(8));
         assert_eq!(PixelFormat::Rgb24.packed_row_bytes(4), Some(12));
+        assert_eq!(PixelFormat::Rgba32.packed_row_bytes(4), Some(16));
     }
 
     #[test]
     fn malformed_storage_is_rejected() {
         assert!(VideoFrame::from_vec(2, 2, PixelFormat::Rgb24, vec![0; 11]).is_err());
         assert!(VideoFrame::from_vec(0, 2, PixelFormat::Gray8, Vec::new()).is_err());
+        assert!(VideoFrame::from_vec(1, 1, PixelFormat::Rgba32, vec![0; 3]).is_err());
     }
 
     #[test]
