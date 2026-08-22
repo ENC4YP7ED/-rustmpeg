@@ -8,6 +8,7 @@ rust-version.workspace = true
 rm-core = { path = "../rm-core" }
 rm-codec = { path = "../rm-codec" }
 rm-format = { path = "../rm-format" }
+rm-scale = { path = "../rm-scale" }
 
 [lints]
 workspace = true
