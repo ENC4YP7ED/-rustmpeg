@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/rm-core",
     "crates/rm-io",
+    "crates/rm-compress",
     "crates/rm-codec",
     "crates/rm-format",
     "crates/rm-scale",
