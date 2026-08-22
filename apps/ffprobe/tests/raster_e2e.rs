@@ -16,44 +16,69 @@ fn temp_dir(label: &str) -> PathBuf {
     path
 }
 
-fn ppm(rgb: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let mut bytes = format!("P6\n{width} {height}\n255\n").into_bytes();
-    bytes.extend_from_slice(rgb);
-    bytes
+fn bmp24(rgb: &[u8], width: u32, height: u32) -> Vec<u8> {
+    assert_eq!(rgb.len(), usize::try_from(width * height * 3).unwrap());
+    let width_usize = usize::try_from(width).unwrap();
+    let height_usize = usize::try_from(height).unwrap();
+    let row_bytes = width_usize * 3;
+    let row_stride = (row_bytes + 3) & !3;
+    let image_size = row_stride * height_usize;
+    let file_size = 54 + image_size;
+
+    let mut out = Vec::with_capacity(file_size);
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&(file_size as u32).to_le_bytes());
+    out.extend_from_slice(&[0; 4]);
+    out.extend_from_slice(&54_u32.to_le_bytes());
+    out.extend_from_slice(&40_u32.to_le_bytes());
+    out.extend_from_slice(&(width as i32).to_le_bytes());
+    out.extend_from_slice(&(height as i32).to_le_bytes());
+    out.extend_from_slice(&1_u16.to_le_bytes());
+    out.extend_from_slice(&24_u16.to_le_bytes());
+    out.extend_from_slice(&0_u32.to_le_bytes());
+    out.extend_from_slice(&(image_size as u32).to_le_bytes());
+    out.extend_from_slice(&0_i32.to_le_bytes());
+    out.extend_from_slice(&0_i32.to_le_bytes());
+    out.extend_from_slice(&0_u32.to_le_bytes());
+    out.extend_from_slice(&0_u32.to_le_bytes());
+
+    for y in (0..height_usize).rev() {
+        let row = &rgb[y * row_bytes..(y + 1) * row_bytes];
+        for pixel in row.chunks_exact(3) {
+            out.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+        }
+        out.resize(out.len() + row_stride - row_bytes, 0);
+    }
+    out
 }
 
-fn ffmpeg() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_ffmpeg"))
+fn tga24(rgb: &[u8], width: u16, height: u16) -> Vec<u8> {
+    assert_eq!(rgb.len(), usize::from(width) * usize::from(height) * 3);
+    let mut out = Vec::with_capacity(18 + rgb.len());
+    out.extend_from_slice(&[0, 0, 2]);
+    out.extend_from_slice(&[0; 5]);
+    out.extend_from_slice(&0_u16.to_le_bytes());
+    out.extend_from_slice(&0_u16.to_le_bytes());
+    out.extend_from_slice(&width.to_le_bytes());
+    out.extend_from_slice(&height.to_le_bytes());
+    out.push(24);
+    out.push(0x20);
+    for pixel in rgb.chunks_exact(3) {
+        out.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+    }
+    out
 }
 
 fn ffprobe() -> Command {
     Command::new(env!("CARGO_BIN_EXE_ffprobe"))
 }
 
-fn make_image(extension: &str, pixels: &[u8], width: u32, height: u32) -> (PathBuf, PathBuf) {
-    let dir = temp_dir(extension);
-    let input = dir.join("source.ppm");
-    let output = dir.join(format!("image.{extension}"));
-    fs::write(&input, ppm(pixels, width, height)).unwrap();
-    let result = ffmpeg()
-        .arg("-hide_banner")
-        .arg("-y")
-        .arg("-i")
-        .arg(&input)
-        .arg(&output)
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    (dir, output)
-}
-
 #[test]
 fn bmp_reports_typed_video_metadata() {
-    let (dir, input) = make_image("bmp", &[255, 0, 0, 0, 255, 0], 2, 1);
+    let dir = temp_dir("bmp");
+    let input = dir.join("image.bmp");
+    fs::write(&input, bmp24(&[255, 0, 0, 0, 255, 0], 2, 1)).unwrap();
+
     let output = ffprobe()
         .arg("-hide_banner")
         .arg("-show_streams")
@@ -74,7 +99,10 @@ fn bmp_reports_typed_video_metadata() {
 
 #[test]
 fn targa_reports_typed_video_metadata() {
-    let (dir, input) = make_image("tga", &[0, 0, 255, 255, 255, 255], 2, 1);
+    let dir = temp_dir("tga");
+    let input = dir.join("image.tga");
+    fs::write(&input, tga24(&[0, 0, 255, 255, 255, 255], 2, 1)).unwrap();
+
     let output = ffprobe()
         .arg("-hide_banner")
         .arg("-show_streams")
