@@ -2,6 +2,8 @@ use rm_core::{MediaError, Result};
 
 use crate::{adler32, deflate::inflate};
 
+const STORED_BLOCK_MAX: usize = u16::MAX as usize;
+
 /// Decompresses an RFC 1950 zlib stream with an explicit uncompressed-size bound.
 ///
 /// Preset dictionaries are deliberately rejected until dictionary negotiation is
@@ -60,6 +62,58 @@ pub fn decompress(bytes: &[u8], output_limit: usize) -> Result<Vec<u8>> {
     Ok(output)
 }
 
+/// Encodes an RFC 1950 zlib stream using only RFC 1951 stored blocks.
+///
+/// This intentionally performs no compression. It is the deterministic baseline
+/// encoder used by formats such as PNG until repository-owned match finding and
+/// Huffman encoding are layered on top.
+///
+/// # Errors
+///
+/// Returns an error if the encoded output size cannot be represented by `usize`.
+pub fn compress_stored(bytes: &[u8]) -> Result<Vec<u8>> {
+    let block_count = if bytes.is_empty() {
+        1
+    } else {
+        bytes.len().div_ceil(STORED_BLOCK_MAX)
+    };
+    let overhead = block_count
+        .checked_mul(5)
+        .and_then(|value| value.checked_add(6))
+        .ok_or_else(|| MediaError::overflow("zlib stored-stream overhead overflow"))?;
+    let capacity = bytes
+        .len()
+        .checked_add(overhead)
+        .ok_or_else(|| MediaError::overflow("zlib stored-stream size overflow"))?;
+    let mut output = Vec::with_capacity(capacity);
+
+    // CM=8, CINFO=7 (32 KiB window), FLEVEL=0, FDICT=0, FCHECK=1.
+    output.extend_from_slice(&[0x78, 0x01]);
+
+    if bytes.is_empty() {
+        write_stored_block(&mut output, &[], true)?;
+    } else {
+        let total_chunks = block_count;
+        for (index, chunk) in bytes.chunks(STORED_BLOCK_MAX).enumerate() {
+            write_stored_block(&mut output, chunk, index + 1 == total_chunks)?;
+        }
+    }
+
+    output.extend_from_slice(&adler32(bytes).to_be_bytes());
+    Ok(output)
+}
+
+fn write_stored_block(output: &mut Vec<u8>, bytes: &[u8], final_block: bool) -> Result<()> {
+    let len = u16::try_from(bytes.len()).map_err(|_| {
+        MediaError::invalid_argument("DEFLATE stored block exceeds 65535 bytes")
+    })?;
+    output.push(u8::from(final_block));
+    output.extend_from_slice(&len.to_le_bytes());
+    output.extend_from_slice(&(!len).to_le_bytes());
+    output.extend_from_slice(bytes);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +149,32 @@ mod tests {
         stream.extend_from_slice(&adler32(&expected).to_be_bytes());
 
         assert_eq!(decompress(&stream, 20_000).unwrap(), expected);
+    }
+
+    #[test]
+    fn stored_encoder_round_trips_empty_small_and_multiblock_payloads() {
+        for source in [
+            Vec::new(),
+            b"stored zlib baseline".to_vec(),
+            (0..150_000_u32)
+                .map(|value| (value.wrapping_mul(37) & 0xFF) as u8)
+                .collect(),
+        ] {
+            let encoded = compress_stored(&source).unwrap();
+            assert_eq!(&encoded[..2], &[0x78, 0x01]);
+            assert_eq!(decompress(&encoded, source.len()).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn stored_encoder_splits_at_rfc1951_limit_and_marks_only_last_block_final() {
+        let source = vec![0xA5; STORED_BLOCK_MAX + 1];
+        let encoded = compress_stored(&source).unwrap();
+
+        assert_eq!(encoded[2] & 1, 0);
+        let second_header = 2 + 5 + STORED_BLOCK_MAX;
+        assert_eq!(encoded[second_header] & 1, 1);
+        assert_eq!(decompress(&encoded, source.len()).unwrap(), source);
     }
 
     #[test]
