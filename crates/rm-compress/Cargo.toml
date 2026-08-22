@@ -1,13 +1,11 @@
 [package]
-name = "rm-codec"
+name = "rm-compress"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
 rm-core = { path = "../rm-core" }
-rm-io = { path = "../rm-io" }
-rm-compress = { path = "../rm-compress" }
 
 [lints]
 workspace = true

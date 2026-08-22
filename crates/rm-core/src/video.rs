@@ -22,6 +22,13 @@ impl PixelFormat {
             Self::Rgb24 => 3,
         }
     }
+
+    #[must_use]
+    pub fn packed_row_bytes(self, width: u32) -> Option<usize> {
+        usize::try_from(width)
+            .ok()?
+            .checked_mul(self.bytes_per_pixel())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +112,12 @@ mod tests {
         assert_eq!(frame.linesize, 6);
         assert_eq!(frame.pixel_count(), 4);
         assert_eq!(frame.row(1).unwrap(), &[0; 6]);
+    }
+
+    #[test]
+    fn packed_row_size_is_checked() {
+        assert_eq!(PixelFormat::Gray8.packed_row_bytes(4), Some(4));
+        assert_eq!(PixelFormat::Rgb24.packed_row_bytes(4), Some(12));
     }
 
     #[test]

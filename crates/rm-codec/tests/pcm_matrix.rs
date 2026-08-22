@@ -37,7 +37,12 @@ fn tolerance(codec: CodecId) -> f64 {
         CodecId::PcmS32Le => 1.0 / 2_147_483_648.0 + 1.0e-12,
         CodecId::PcmF32Le => 1.0e-6,
         CodecId::PcmF64Le => 1.0e-12,
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa => {
+        CodecId::Pbm
+        | CodecId::Pgm
+        | CodecId::Ppm
+        | CodecId::Bmp
+        | CodecId::Targa
+        | CodecId::Png => {
             unreachable!("PCM test received image codec")
         }
     }
