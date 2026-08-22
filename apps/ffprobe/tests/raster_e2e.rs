@@ -130,14 +130,13 @@ fn targa_reports_typed_video_metadata() {
 }
 
 #[test]
-fn capability_list_includes_only_the_newly_implemented_rasters() {
+fn capability_list_includes_implemented_rasters() {
     let output = ffprobe().arg("-codecs").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
-    for codec in ["pbm", "pgm", "ppm", "bmp", "targa"] {
+    for codec in ["pbm", "pgm", "ppm", "bmp", "targa", "png"] {
         assert!(stdout.contains(codec), "missing codec {codec}");
     }
-    assert!(!stdout.contains("png"));
     assert!(!stdout.contains("mjpeg"));
 }
 
