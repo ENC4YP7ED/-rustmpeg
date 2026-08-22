@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,9 +28,24 @@ jobs:
             grep -Eo '"name":"[^"]+"[^}]*"source":"[^"]+"' <<<"$metadata" || true
             exit 1
           fi
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Test
+      - name: Test debug targets
         run: cargo test --workspace --all-targets
+      - name: Build release targets
+        run: cargo build --workspace --release
       - name: Clippy
         run: cargo clippy --workspace --all-targets
+      - name: Format
+        run: cargo fmt --all --check
+
+  portable:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal
+      - name: Test workspace
+        run: cargo test --workspace --all-targets
