@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bmp;
+pub mod png;
 pub mod pnm;
 pub mod tga;
 
