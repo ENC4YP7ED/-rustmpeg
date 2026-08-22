@@ -139,7 +139,9 @@ fn decode_png_16(bytes: &[u8]) -> Result<VideoFrame> {
                     return Err(MediaError::invalid_data("PNG tRNS appeared after IDAT"));
                 }
                 if transparency.is_some() {
-                    return Err(MediaError::invalid_data("PNG contains multiple tRNS chunks"));
+                    return Err(MediaError::invalid_data(
+                        "PNG contains multiple tRNS chunks",
+                    ));
                 }
                 match png.color_type {
                     0 if data.len() != 2 => {

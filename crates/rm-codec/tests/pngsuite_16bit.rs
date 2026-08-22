@@ -9,14 +9,20 @@ const BASN6A16: &[u8] = include_bytes!("../testdata/pngsuite/basn6a16.png");
 #[test]
 fn pngsuite_16_bit_grayscale_decodes_to_gray8() {
     let frame = decode_png(BASN0G16).expect("basn0g16 must decode");
-    assert_eq!((frame.width, frame.height, frame.format), (32, 32, PixelFormat::Gray8));
+    assert_eq!(
+        (frame.width, frame.height, frame.format),
+        (32, 32, PixelFormat::Gray8)
+    );
     assert_eq!(frame.data.len(), 32 * 32);
 }
 
 #[test]
 fn pngsuite_16_bit_truecolor_decodes_to_rgb24() {
     let frame = decode_png(BASN2C16).expect("basn2c16 must decode");
-    assert_eq!((frame.width, frame.height, frame.format), (32, 32, PixelFormat::Rgb24));
+    assert_eq!(
+        (frame.width, frame.height, frame.format),
+        (32, 32, PixelFormat::Rgb24)
+    );
     assert_eq!(frame.data.len(), 32 * 32 * 3);
 }
 
@@ -33,7 +39,10 @@ fn pngsuite_16_bit_gray_alpha_preserves_alpha() {
 #[test]
 fn pngsuite_16_bit_rgba_preserves_alpha() {
     let frame = decode_png(BASN6A16).expect("basn6a16 must decode");
-    assert_eq!((frame.width, frame.height, frame.format), (32, 32, PixelFormat::Rgba32));
+    assert_eq!(
+        (frame.width, frame.height, frame.format),
+        (32, 32, PixelFormat::Rgba32)
+    );
     assert_eq!(frame.data.len(), 32 * 32 * 4);
 }
 
