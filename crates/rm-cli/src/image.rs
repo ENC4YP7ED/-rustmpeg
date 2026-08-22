@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 use rm_codec::bmp::{decode_bmp, encode_bmp, probe_bmp};
+use rm_codec::png::{decode_png, encode_png, probe_png};
 use rm_codec::pnm::{PnmImage, PnmKind, decode_pnm, encode_pnm, probe_pnm};
 use rm_codec::tga::{decode_tga, encode_tga, probe_tga};
 use rm_codec::{CodecId, MediaType, descriptor};
@@ -17,21 +18,31 @@ pub struct DecodedImage {
 
 #[must_use]
 pub fn probe_image(bytes: &[u8]) -> u8 {
-    probe_pnm(bytes).max(probe_bmp(bytes)).max(probe_tga(bytes))
+    probe_pnm(bytes)
+        .max(probe_bmp(bytes))
+        .max(probe_tga(bytes))
+        .max(probe_png(bytes))
 }
 
 pub fn decode_image(bytes: &[u8]) -> Result<DecodedImage> {
     let pnm_score = probe_pnm(bytes);
     let bmp_score = probe_bmp(bytes);
     let tga_score = probe_tga(bytes);
-    let best = pnm_score.max(bmp_score).max(tga_score);
+    let png_score = probe_png(bytes);
+    let best = pnm_score.max(bmp_score).max(tga_score).max(png_score);
 
     if best == 0 {
         return Err(MediaError::invalid_data(
-            "input is not a supported image (PBM/PGM/PPM/BMP/TGA)",
+            "input is not a supported image (PBM/PGM/PPM/BMP/TGA/PNG)",
         ));
     }
 
+    if png_score == best {
+        return Ok(DecodedImage {
+            codec: CodecId::Png,
+            frame: decode_png(bytes)?,
+        });
+    }
     if bmp_score == best {
         return Ok(DecodedImage {
             codec: CodecId::Bmp,
@@ -65,6 +76,7 @@ pub fn encode_image(codec: CodecId, frame: &VideoFrame) -> Result<Vec<u8>> {
             encode_bmp(&converted)
         }
         CodecId::Targa => encode_tga(frame),
+        CodecId::Png => encode_png(frame),
         CodecId::PcmU8
         | CodecId::PcmS16Le
         | CodecId::PcmS24Le
@@ -82,7 +94,7 @@ pub fn prepare_frame(
     size: Option<(u32, u32)>,
 ) -> Result<VideoFrame> {
     let target_format = match codec {
-        CodecId::Targa => frame.format,
+        CodecId::Targa | CodecId::Png => frame.format,
         _ => pixel_format_for_codec(codec)?,
     };
     let converted = convert_pixel_format(frame, target_format)?;
@@ -97,7 +109,12 @@ pub fn is_image_codec(codec: CodecId) -> bool {
     descriptor(codec).media_type == MediaType::Video
         && matches!(
             codec,
-            CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa
+            CodecId::Pbm
+                | CodecId::Pgm
+                | CodecId::Ppm
+                | CodecId::Bmp
+                | CodecId::Targa
+                | CodecId::Png
         )
 }
 
@@ -114,6 +131,8 @@ pub fn codec_for_path(path: &Path) -> Option<CodecId> {
         Some(CodecId::Bmp)
     } else if extension.eq_ignore_ascii_case("tga") || extension.eq_ignore_ascii_case("targa") {
         Some(CodecId::Targa)
+    } else if extension.eq_ignore_ascii_case("png") {
+        Some(CodecId::Png)
     } else {
         None
     }
@@ -136,6 +155,7 @@ pub const fn pnm_kind_for_codec(codec: CodecId) -> Option<PnmKind> {
         CodecId::Ppm => Some(PnmKind::Ppm),
         CodecId::Bmp
         | CodecId::Targa
+        | CodecId::Png
         | CodecId::PcmU8
         | CodecId::PcmS16Le
         | CodecId::PcmS24Le
@@ -148,7 +168,7 @@ pub const fn pnm_kind_for_codec(codec: CodecId) -> Option<PnmKind> {
 pub fn pixel_format_for_codec(codec: CodecId) -> Result<PixelFormat> {
     match codec {
         CodecId::Pbm | CodecId::Pgm => Ok(PixelFormat::Gray8),
-        CodecId::Ppm | CodecId::Bmp | CodecId::Targa => Ok(PixelFormat::Rgb24),
+        CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png => Ok(PixelFormat::Rgb24),
         CodecId::PcmU8
         | CodecId::PcmS16Le
         | CodecId::PcmS24Le
@@ -171,6 +191,7 @@ mod tests {
         assert_eq!(codec_for_path(Path::new("x.ppm")), Some(CodecId::Ppm));
         assert_eq!(codec_for_path(Path::new("x.BMP")), Some(CodecId::Bmp));
         assert_eq!(codec_for_path(Path::new("x.tga")), Some(CodecId::Targa));
+        assert_eq!(codec_for_path(Path::new("x.PNG")), Some(CodecId::Png));
         assert_eq!(codec_for_path(Path::new("x.wav")), None);
     }
 
@@ -201,6 +222,17 @@ mod tests {
         let encoded = encode_image(CodecId::Targa, &prepared).unwrap();
         let decoded = decode_image(&encoded).unwrap();
         assert_eq!(decoded.codec, CodecId::Targa);
+        assert_eq!(decoded.frame, frame);
+    }
+
+    #[test]
+    fn png_preserves_grayscale_frames() {
+        let frame = VideoFrame::from_vec(2, 1, PixelFormat::Gray8, vec![12, 240]).unwrap();
+        let prepared = prepare_frame(&frame, CodecId::Png, None).unwrap();
+        assert_eq!(prepared.format, PixelFormat::Gray8);
+        let encoded = encode_image(CodecId::Png, &prepared).unwrap();
+        let decoded = decode_image(&encoded).unwrap();
+        assert_eq!(decoded.codec, CodecId::Png);
         assert_eq!(decoded.frame, frame);
     }
 
