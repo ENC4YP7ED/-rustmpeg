@@ -109,7 +109,7 @@ fn run_inner(args: &[OsString]) -> Result<()> {
     }
 
     Err(MediaError::unsupported(
-        "input format is not implemented yet (supported: wav, image2 PBM/PGM/PPM/BMP/TGA)",
+        "input format is not implemented yet (supported: wav, image2 PBM/PGM/PPM/BMP/TGA/PNG)",
     ))
 }
 
@@ -458,7 +458,7 @@ fn sample_format_name(codec: CodecId) -> &'static str {
         CodecId::PcmS24Le | CodecId::PcmS32Le => "s32",
         CodecId::PcmF32Le => "flt",
         CodecId::PcmF64Le => "dbl",
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa => "unknown",
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png => "unknown",
     }
 }
 
