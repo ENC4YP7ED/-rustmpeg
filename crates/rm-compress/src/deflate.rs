@@ -5,19 +5,19 @@ const CODE_LENGTH_ORDER: [usize; 19] = [
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
 ];
 const LENGTH_BASE: [usize; 29] = [
-    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99,
-    115, 131, 163, 195, 227, 258,
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
 ];
 const LENGTH_EXTRA: [u8; 29] = [
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
 ];
 const DISTANCE_BASE: [usize; 30] = [
-    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025,
-    1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
 ];
 const DISTANCE_EXTRA: [u8; 30] = [
-    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12,
-    12, 13, 13,
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
 ];
 
 /// Inflates a raw RFC 1951 DEFLATE stream with an explicit output bound.
@@ -100,15 +100,12 @@ fn fixed_tables() -> Result<(Huffman, Huffman)> {
 }
 
 fn dynamic_tables(reader: &mut BitReader<'_>) -> Result<(Huffman, Option<Huffman>)> {
-    let literal_count = usize::try_from(reader.read_bits(5)?)
-        .expect("five DEFLATE bits always fit usize")
-        + 257;
-    let distance_count = usize::try_from(reader.read_bits(5)?)
-        .expect("five DEFLATE bits always fit usize")
-        + 1;
-    let code_length_count = usize::try_from(reader.read_bits(4)?)
-        .expect("four DEFLATE bits always fit usize")
-        + 4;
+    let literal_count =
+        usize::try_from(reader.read_bits(5)?).expect("five DEFLATE bits always fit usize") + 257;
+    let distance_count =
+        usize::try_from(reader.read_bits(5)?).expect("five DEFLATE bits always fit usize") + 1;
+    let code_length_count =
+        usize::try_from(reader.read_bits(4)?).expect("four DEFLATE bits always fit usize") + 4;
 
     if literal_count > 286 || distance_count > 32 || code_length_count > 19 {
         return Err(MediaError::invalid_data(
@@ -118,8 +115,8 @@ fn dynamic_tables(reader: &mut BitReader<'_>) -> Result<(Huffman, Option<Huffman
 
     let mut code_lengths = [0_u8; 19];
     for &symbol in &CODE_LENGTH_ORDER[..code_length_count] {
-        code_lengths[symbol] = u8::try_from(reader.read_bits(3)?)
-            .expect("three DEFLATE bits always fit u8");
+        code_lengths[symbol] =
+            u8::try_from(reader.read_bits(3)?).expect("three DEFLATE bits always fit u8");
     }
     let code_length_table = Huffman::from_lengths(&code_lengths)?;
 
@@ -185,12 +182,7 @@ fn read_dynamic_lengths(
     Ok(lengths)
 }
 
-fn extend_repeated(
-    lengths: &mut Vec<u8>,
-    value: u8,
-    repeat: usize,
-    total: usize,
-) -> Result<()> {
+fn extend_repeated(lengths: &mut Vec<u8>, value: u8, repeat: usize, total: usize) -> Result<()> {
     let new_len = lengths
         .len()
         .checked_add(repeat)
@@ -223,8 +215,7 @@ fn decode_compressed_block(
                 let extra_length = reader.read_bits(LENGTH_EXTRA[length_index])?;
                 let length = LENGTH_BASE[length_index]
                     .checked_add(
-                        usize::try_from(extra_length)
-                            .expect("DEFLATE length extra bits fit usize"),
+                        usize::try_from(extra_length).expect("DEFLATE length extra bits fit usize"),
                     )
                     .ok_or_else(|| MediaError::overflow("DEFLATE match length overflow"))?;
 
@@ -401,9 +392,10 @@ impl<'a> BitReader<'a> {
         }
         let mut value = 0_u32;
         for shift in 0..count {
-            let byte = *self.bytes.get(self.byte_index).ok_or_else(|| {
-                MediaError::eof("unexpected end of DEFLATE bitstream")
-            })?;
+            let byte = *self
+                .bytes
+                .get(self.byte_index)
+                .ok_or_else(|| MediaError::eof("unexpected end of DEFLATE bitstream"))?;
             value |= u32::from((byte >> self.bit_index) & 1) << shift;
             self.bit_index += 1;
             if self.bit_index == 8 {
@@ -441,9 +433,10 @@ impl<'a> BitReader<'a> {
             .byte_index
             .checked_add(len)
             .ok_or_else(|| MediaError::overflow("DEFLATE byte range overflow"))?;
-        let bytes = self.bytes.get(self.byte_index..end).ok_or_else(|| {
-            MediaError::eof("unexpected end of DEFLATE stored block")
-        })?;
+        let bytes = self
+            .bytes
+            .get(self.byte_index..end)
+            .ok_or_else(|| MediaError::eof("unexpected end of DEFLATE stored block"))?;
         self.byte_index = end;
         Ok(bytes)
     }
@@ -456,8 +449,8 @@ mod tests {
     #[test]
     fn stored_block_decodes_exact_payload() {
         let stream = [
-            0x01, 0x14, 0x00, 0xEB, 0xFF, 0x73, 0x74, 0x6F, 0x72, 0x65, 0x64, 0x20, 0x62,
-            0x6C, 0x6F, 0x63, 0x6B, 0x20, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64,
+            0x01, 0x14, 0x00, 0xEB, 0xFF, 0x73, 0x74, 0x6F, 0x72, 0x65, 0x64, 0x20, 0x62, 0x6C,
+            0x6F, 0x63, 0x6B, 0x20, 0x70, 0x61, 0x79, 0x6C, 0x6F, 0x61, 0x64,
         ];
         assert_eq!(inflate(&stream, 1024).unwrap(), b"stored block payload");
     }
@@ -467,20 +460,16 @@ mod tests {
         let stream = [
             0xCB, 0x48, 0xCD, 0xC9, 0xC9, 0x57, 0xC8, 0x40, 0x27, 0x15, 0x01,
         ];
-        assert_eq!(
-            inflate(&stream, 1024).unwrap(),
-            b"hello hello hello hello!"
-        );
+        assert_eq!(inflate(&stream, 1024).unwrap(), b"hello hello hello hello!");
     }
 
     #[test]
     fn dynamic_huffman_stream_decodes_long_repetitive_payload() {
         let stream = [
-            0xED, 0xC7, 0x31, 0x01, 0x00, 0x20, 0x0C, 0x03, 0x30, 0xAD, 0xA5, 0xC3, 0xBF,
-            0x05, 0x26, 0x00, 0x09, 0xC9, 0x97, 0x64, 0x9D, 0xD5, 0x76, 0xE6, 0x46, 0x55,
-            0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
-            0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
-            0x55, 0xF5, 0xD7, 0x07,
+            0xED, 0xC7, 0x31, 0x01, 0x00, 0x20, 0x0C, 0x03, 0x30, 0xAD, 0xA5, 0xC3, 0xBF, 0x05,
+            0x26, 0x00, 0x09, 0xC9, 0x97, 0x64, 0x9D, 0xD5, 0x76, 0xE6, 0x46, 0x55, 0x55, 0x55,
+            0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55,
+            0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0xF5, 0xD7, 0x07,
         ];
         let expected = b"aaaaabbbbcccdde".repeat(1_000);
         assert_eq!(inflate(&stream, 20_000).unwrap(), expected);

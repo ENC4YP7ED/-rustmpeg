@@ -458,7 +458,12 @@ fn sample_format_name(codec: CodecId) -> &'static str {
         CodecId::PcmS24Le | CodecId::PcmS32Le => "s32",
         CodecId::PcmF32Le => "flt",
         CodecId::PcmF64Le => "dbl",
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png => "unknown",
+        CodecId::Pbm
+        | CodecId::Pgm
+        | CodecId::Ppm
+        | CodecId::Bmp
+        | CodecId::Targa
+        | CodecId::Png => "unknown",
     }
 }
 

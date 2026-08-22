@@ -14,7 +14,12 @@ fn wave_tag(codec: CodecId) -> u16 {
     match codec {
         CodecId::PcmF32Le | CodecId::PcmF64Le => 3,
         CodecId::PcmU8 | CodecId::PcmS16Le | CodecId::PcmS24Le | CodecId::PcmS32Le => 1,
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png => {
+        CodecId::Pbm
+        | CodecId::Pgm
+        | CodecId::Ppm
+        | CodecId::Bmp
+        | CodecId::Targa
+        | CodecId::Png => {
             unreachable!("WAVE matrix received image codec")
         }
     }

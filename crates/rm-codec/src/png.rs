@@ -76,12 +76,8 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
         let crc_bytes = bytes
             .get(data_end..crc_end)
             .ok_or_else(|| MediaError::eof("truncated PNG chunk CRC"))?;
-        let expected_crc = u32::from_be_bytes([
-            crc_bytes[0],
-            crc_bytes[1],
-            crc_bytes[2],
-            crc_bytes[3],
-        ]);
+        let expected_crc =
+            u32::from_be_bytes([crc_bytes[0], crc_bytes[1], crc_bytes[2], crc_bytes[3]]);
         let actual_crc = chunk_crc(chunk_type, data);
         if actual_crc != expected_crc {
             return Err(MediaError::invalid_data(format!(
@@ -104,14 +100,15 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
                 ihdr = Some(parse_ihdr(data)?);
             }
             b"PLTE" => {
-                let header = ihdr.ok_or_else(|| {
-                    MediaError::invalid_data("PNG PLTE appeared before IHDR")
-                })?;
+                let header =
+                    ihdr.ok_or_else(|| MediaError::invalid_data("PNG PLTE appeared before IHDR"))?;
                 if saw_idat {
                     return Err(MediaError::invalid_data("PNG PLTE appeared after IDAT"));
                 }
                 if saw_plte {
-                    return Err(MediaError::invalid_data("PNG contains multiple PLTE chunks"));
+                    return Err(MediaError::invalid_data(
+                        "PNG contains multiple PLTE chunks",
+                    ));
                 }
                 if header.color_type == 0 {
                     return Err(MediaError::invalid_data(
@@ -133,8 +130,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
                     ));
                 }
                 saw_idat = true;
-                idat
-                    .try_reserve(data.len())
+                idat.try_reserve(data.len())
                     .map_err(|_| MediaError::overflow("PNG IDAT allocation failed"))?;
                 idat.extend_from_slice(data);
             }
@@ -434,8 +430,8 @@ mod tests {
 
     #[test]
     fn grayscale_round_trip_is_exact() {
-        let frame = VideoFrame::from_vec(3, 2, PixelFormat::Gray8, vec![0, 127, 255, 20, 30, 40])
-            .unwrap();
+        let frame =
+            VideoFrame::from_vec(3, 2, PixelFormat::Gray8, vec![0, 127, 255, 20, 30, 40]).unwrap();
         let encoded = encode_png(&frame).unwrap();
         assert_eq!(probe_png(&encoded), 100);
         assert_eq!(decode_png(&encoded).unwrap(), frame);
