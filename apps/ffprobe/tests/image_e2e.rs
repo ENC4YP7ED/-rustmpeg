@@ -101,10 +101,9 @@ fn capability_lists_advertise_only_implemented_image_surface() {
     let codecs = ffprobe().arg("-codecs").output().unwrap();
     assert!(codecs.status.success());
     let codecs = String::from_utf8(codecs.stdout).unwrap();
-    for codec in ["pbm", "pgm", "ppm"] {
+    for codec in ["pbm", "pgm", "ppm", "png"] {
         assert!(codecs.contains(codec), "missing image codec {codec}");
     }
-    assert!(!codecs.contains("png"));
     assert!(!codecs.contains("mjpeg"));
 }
 
