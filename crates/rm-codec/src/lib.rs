@@ -144,9 +144,6 @@ pub fn convert_pcm(input: CodecId, output: CodecId, channels: u16, data: &[u8]) 
     if channels == 0 {
         return Err(MediaError::invalid_argument("PCM channel count must be non-zero"));
     }
-    if input == output {
-        return Ok(data.to_vec());
-    }
 
     let input_width = pcm_bytes_per_sample(input);
     let output_width = pcm_bytes_per_sample(output);
@@ -157,6 +154,10 @@ pub fn convert_pcm(input: CodecId, output: CodecId, channels: u16, data: &[u8]) 
         return Err(MediaError::invalid_data(
             "PCM input does not contain complete interleaved sample frames",
         ));
+    }
+
+    if input == output {
+        return Ok(data.to_vec());
     }
 
     let sample_count = data.len() / input_width;
