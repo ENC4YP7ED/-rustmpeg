@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod ffprobe;
+
 use std::ffi::OsString;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +34,13 @@ pub fn run(program: Program, args: impl IntoIterator<Item = OsString>) -> i32 {
         return 0;
     }
 
+    match program {
+        Program::Ffprobe => ffprobe::run(&args),
+        Program::Ffmpeg | Program::Ffplay => run_bootstrap(program, &args),
+    }
+}
+
+fn run_bootstrap(program: Program, args: &[OsString]) -> i32 {
     let wants_help = args.len() <= 1
         || args
             .iter()

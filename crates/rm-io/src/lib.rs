@@ -255,7 +255,10 @@ impl<'a> BitReader<'a> {
 
         let mut value = 0_u64;
         for _ in 0..count {
-            value = (value << 1) | u64::from(self.read_bit()?);
+            value <<= 1;
+            if self.read_bit()? {
+                value |= 1;
+            }
         }
         Ok(value)
     }
