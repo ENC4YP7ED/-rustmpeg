@@ -109,7 +109,7 @@ fn run_inner(args: &[OsString]) -> Result<()> {
     }
 
     Err(MediaError::unsupported(
-        "input format is not implemented yet (supported: wav, image2 PBM/PGM/PPM)",
+        "input format is not implemented yet (supported: wav, image2 PBM/PGM/PPM/BMP/TGA)",
     ))
 }
 
@@ -122,7 +122,7 @@ fn probe_image2_input(options: &Options, input: &Path, pattern: &ImagePattern) -
     let first_bytes = fs::read(&paths[0])?;
     if probe_image(&first_bytes) == 0 {
         return Err(MediaError::invalid_data(format!(
-            "image2 frame '{}' is not PBM/PGM/PPM",
+            "image2 frame '{}' is not a supported image",
             paths[0].display()
         )));
     }
@@ -458,7 +458,7 @@ fn sample_format_name(codec: CodecId) -> &'static str {
         CodecId::PcmS24Le | CodecId::PcmS32Le => "s32",
         CodecId::PcmF32Le => "flt",
         CodecId::PcmF64Le => "dbl",
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => "unknown",
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa => "unknown",
     }
 }
 

@@ -124,8 +124,8 @@ Protocol -> buffered IO -> probe -> demux -> packet
 
 - [x] image2 sequence protocol/demux/mux
 - [x] PPM/PGM/PBM P1-P6
-- [ ] BMP
-- [ ] TGA
+- [x] BMP
+- [x] TGA
 - [ ] PNG (including repository-owned DEFLATE/zlib)
 - [ ] JPEG baseline/progressive
 - [x] packed pixel format model and initial scaler (`gray8`/`rgb24`, nearest-neighbor)

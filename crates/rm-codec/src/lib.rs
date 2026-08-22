@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
+pub mod bmp;
 pub mod pnm;
+pub mod tga;
 
 use rm_core::{MediaError, Result};
 
@@ -24,6 +26,8 @@ pub enum CodecId {
     Pbm,
     Pgm,
     Ppm,
+    Bmp,
+    Targa,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +40,7 @@ pub struct CodecDescriptor {
     pub can_encode: bool,
 }
 
-const CODECS: [CodecDescriptor; 9] = [
+const CODECS: [CodecDescriptor; 11] = [
     CodecDescriptor {
         id: CodecId::PcmU8,
         name: "pcm_u8",
@@ -109,6 +113,22 @@ const CODECS: [CodecDescriptor; 9] = [
         can_decode: true,
         can_encode: true,
     },
+    CodecDescriptor {
+        id: CodecId::Bmp,
+        name: "bmp",
+        long_name: "BMP (Windows and OS/2 bitmap)",
+        media_type: MediaType::Video,
+        can_decode: true,
+        can_encode: true,
+    },
+    CodecDescriptor {
+        id: CodecId::Targa,
+        name: "targa",
+        long_name: "Truevision Targa image",
+        media_type: MediaType::Video,
+        can_decode: true,
+        can_encode: true,
+    },
 ];
 
 #[must_use]
@@ -128,6 +148,8 @@ pub const fn descriptor(id: CodecId) -> &'static CodecDescriptor {
         CodecId::Pbm => &CODECS[6],
         CodecId::Pgm => &CODECS[7],
         CodecId::Ppm => &CODECS[8],
+        CodecId::Bmp => &CODECS[9],
+        CodecId::Targa => &CODECS[10],
     }
 }
 
@@ -173,7 +195,7 @@ pub const fn pcm_bits_per_sample(id: CodecId) -> Option<u16> {
         CodecId::PcmS24Le => Some(24),
         CodecId::PcmS32Le | CodecId::PcmF32Le => Some(32),
         CodecId::PcmF64Le => Some(64),
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => None,
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa => None,
     }
 }
 
@@ -190,7 +212,7 @@ pub const fn pcm_wave_format_tag(id: CodecId) -> Option<u16> {
     match id {
         CodecId::PcmF32Le | CodecId::PcmF64Le => Some(3),
         CodecId::PcmU8 | CodecId::PcmS16Le | CodecId::PcmS24Le | CodecId::PcmS32Le => Some(1),
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => None,
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa => None,
     }
 }
 
@@ -251,7 +273,7 @@ fn decode_sample(codec: CodecId, bytes: &[u8]) -> Result<f64> {
         CodecId::PcmF64Le => f64::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ]),
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => {
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa => {
             return Err(MediaError::invalid_argument("codec is not PCM"));
         }
     };
@@ -291,7 +313,7 @@ fn encode_sample(codec: CodecId, sample: f64, output: &mut Vec<u8>) -> Result<()
         }
         CodecId::PcmF32Le => output.extend_from_slice(&(sanitize(sample) as f32).to_le_bytes()),
         CodecId::PcmF64Le => output.extend_from_slice(&sanitize(sample).to_le_bytes()),
-        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => {
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm | CodecId::Bmp | CodecId::Targa => {
             return Err(MediaError::invalid_argument("codec is not PCM"));
         }
     }
@@ -328,15 +350,21 @@ mod tests {
     #[test]
     fn registry_contains_audio_and_video_codecs() {
         assert_eq!(descriptor(CodecId::Ppm).media_type, MediaType::Video);
+        assert_eq!(descriptor(CodecId::Bmp).media_type, MediaType::Video);
+        assert_eq!(descriptor(CodecId::Targa).media_type, MediaType::Video);
         assert_eq!(descriptor(CodecId::PcmS16Le).media_type, MediaType::Audio);
         assert_eq!(find_by_name("ppm"), Some(CodecId::Ppm));
+        assert_eq!(find_by_name("bmp"), Some(CodecId::Bmp));
+        assert_eq!(find_by_name("targa"), Some(CodecId::Targa));
     }
 
     #[test]
     fn pcm_metadata_rejects_image_codecs() {
-        assert_eq!(pcm_bits_per_sample(CodecId::Pgm), None);
-        assert_eq!(pcm_bytes_per_sample(CodecId::Ppm), None);
-        assert_eq!(pcm_wave_format_tag(CodecId::Pbm), None);
+        for codec in [CodecId::Pgm, CodecId::Ppm, CodecId::Bmp, CodecId::Targa] {
+            assert_eq!(pcm_bits_per_sample(codec), None);
+            assert_eq!(pcm_bytes_per_sample(codec), None);
+            assert_eq!(pcm_wave_format_tag(codec), None);
+        }
     }
 
     #[test]
@@ -351,7 +379,7 @@ mod tests {
     #[test]
     fn non_pcm_conversion_is_rejected() {
         assert!(convert_pcm(CodecId::Ppm, CodecId::PcmU8, 1, &[]).is_err());
-        assert!(convert_pcm(CodecId::PcmU8, CodecId::Pgm, 1, &[]).is_err());
+        assert!(convert_pcm(CodecId::PcmU8, CodecId::Targa, 1, &[]).is_err());
     }
 
     #[test]
