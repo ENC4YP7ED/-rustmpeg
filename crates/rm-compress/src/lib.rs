@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod deflate;
+
 const ADLER_MODULUS: u32 = 65_521;
 const CRC32_POLYNOMIAL: u32 = 0xEDB8_8320;
 
