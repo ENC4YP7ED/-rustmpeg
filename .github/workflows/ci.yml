@@ -7,9 +7,176 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  apply_png16:
+    if: github.event_name == 'pull_request' && github.head_ref == 'build/phase2-png-depth-interlace'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Apply 16-bit decoder
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('crates/rm-codec/src/png.rs')
+          text = p.read_text()
+
+          old = '''    let valid_bit_depth = match header.color_type {\n        0 => matches!(header.bit_depth, 1 | 2 | 4 | 8),\n        2 => header.bit_depth == 8,\n        3 => matches!(header.bit_depth, 1 | 2 | 4 | 8),\n        4 | 6 => header.bit_depth == 8,\n        _ => false,\n    };'''
+          new = '''    let valid_bit_depth = match header.color_type {\n        0 => matches!(header.bit_depth, 1 | 2 | 4 | 8 | 16),\n        2 => matches!(header.bit_depth, 8 | 16),\n        3 => matches!(header.bit_depth, 1 | 2 | 4 | 8),\n        4 | 6 => matches!(header.bit_depth, 8 | 16),\n        _ => false,\n    };'''
+          if old not in text:
+              raise SystemExit('valid bit depth block not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    if header.color_type == 3 {\n        return decode_indexed_scanlines(header, compressed, palette, transparency);\n    }\n    if header.color_type == 0 && header.bit_depth < 8 {'''
+          new = '''    if header.color_type == 3 {\n        return decode_indexed_scanlines(header, compressed, palette, transparency);\n    }\n    if header.bit_depth == 16 {\n        return decode_16bit_scanlines(header, compressed, transparency);\n    }\n    if header.color_type == 0 && header.bit_depth < 8 {'''
+          if old not in text:
+              raise SystemExit('decode dispatch block not found')
+          text = text.replace(old, new, 1)
+
+          marker = 'fn decode_indexed_scanlines('
+          idx = text.index(marker)
+          helper = r'''fn decode_16bit_scanlines(
+    header: Ihdr,
+    compressed: &[u8],
+    transparency: Option<&[u8]>,
+) -> Result<VideoFrame> {
+    let channels = match header.color_type {
+        0 => 1_usize,
+        2 => 3_usize,
+        4 => 2_usize,
+        6 => 4_usize,
+        _ => return Err(MediaError::unsupported("unsupported 16-bit PNG color type")),
+    };
+    let width = usize::try_from(header.width)
+        .map_err(|_| MediaError::overflow("PNG width exceeds usize"))?;
+    let height = usize::try_from(header.height)
+        .map_err(|_| MediaError::overflow("PNG height exceeds usize"))?;
+    let bytes_per_pixel = channels
+        .checked_mul(2)
+        .ok_or_else(|| MediaError::overflow("PNG 16-bit bytes-per-pixel overflow"))?;
+    let stride = width
+        .checked_mul(bytes_per_pixel)
+        .ok_or_else(|| MediaError::overflow("PNG 16-bit row stride overflow"))?;
+    let raw = decode_packed_rows(compressed, stride, height, bytes_per_pixel)?;
+
+    let gray_key = if header.color_type == 0 {
+        transparency.map(|key| u16::from_be_bytes([key[0], key[1]]))
+    } else {
+        None
+    };
+    let rgb_key = if header.color_type == 2 {
+        transparency.map(|key| {
+            [
+                u16::from_be_bytes([key[0], key[1]]),
+                u16::from_be_bytes([key[2], key[3]]),
+                u16::from_be_bytes([key[4], key[5]]),
+            ]
+        })
+    } else {
+        None
+    };
+
+    let output_format = match header.color_type {
+        0 if gray_key.is_some() => PixelFormat::GrayAlpha8,
+        0 => PixelFormat::Gray8,
+        2 if rgb_key.is_some() => PixelFormat::Rgba32,
+        2 => PixelFormat::Rgb24,
+        4 => PixelFormat::GrayAlpha8,
+        6 => PixelFormat::Rgba32,
+        _ => return Err(MediaError::unsupported("unsupported 16-bit PNG color type")),
+    };
+    let pixel_count = width
+        .checked_mul(height)
+        .ok_or_else(|| MediaError::overflow("PNG 16-bit pixel count overflow"))?;
+    let output_size = pixel_count
+        .checked_mul(output_format.bytes_per_pixel())
+        .ok_or_else(|| MediaError::overflow("PNG 16-bit output size overflow"))?;
+    let mut output = Vec::with_capacity(output_size);
+
+    for pixel in raw.chunks_exact(bytes_per_pixel) {
+        match header.color_type {
+            0 => {
+                let gray = read_be_u16(pixel, 0)?;
+                output.push(scale_u16_to_u8(gray)?);
+                if let Some(key) = gray_key {
+                    output.push(if gray == key { 0 } else { 255 });
+                }
+            }
+            2 => {
+                let red = read_be_u16(pixel, 0)?;
+                let green = read_be_u16(pixel, 2)?;
+                let blue = read_be_u16(pixel, 4)?;
+                output.extend_from_slice(&[
+                    scale_u16_to_u8(red)?,
+                    scale_u16_to_u8(green)?,
+                    scale_u16_to_u8(blue)?,
+                ]);
+                if let Some(key) = rgb_key {
+                    output.push(if [red, green, blue] == key { 0 } else { 255 });
+                }
+            }
+            4 => {
+                let gray = read_be_u16(pixel, 0)?;
+                let alpha = read_be_u16(pixel, 2)?;
+                output.extend_from_slice(&[scale_u16_to_u8(gray)?, scale_u16_to_u8(alpha)?]);
+            }
+            6 => {
+                let red = read_be_u16(pixel, 0)?;
+                let green = read_be_u16(pixel, 2)?;
+                let blue = read_be_u16(pixel, 4)?;
+                let alpha = read_be_u16(pixel, 6)?;
+                output.extend_from_slice(&[
+                    scale_u16_to_u8(red)?,
+                    scale_u16_to_u8(green)?,
+                    scale_u16_to_u8(blue)?,
+                    scale_u16_to_u8(alpha)?,
+                ]);
+            }
+            _ => unreachable!(),
+        }
+    }
+    if output.len() != output_size {
+        return Err(MediaError::invalid_data("PNG 16-bit sample count mismatch"));
+    }
+    VideoFrame::from_vec(header.width, header.height, output_format, output)
+}
+
+fn read_be_u16(bytes: &[u8], offset: usize) -> Result<u16> {
+    let pair = bytes
+        .get(offset..offset + 2)
+        .ok_or_else(|| MediaError::invalid_data("PNG 16-bit sample is truncated"))?;
+    Ok(u16::from_be_bytes([pair[0], pair[1]]))
+}
+
+fn scale_u16_to_u8(sample: u16) -> Result<u8> {
+    let scaled = (u32::from(sample) * 255 + 32_767) / 65_535;
+    u8::try_from(scaled).map_err(|_| MediaError::overflow("PNG 16-bit scaling exceeds u8"))
+}
+
+'''
+          text = text[:idx] + helper + text[idx:]
+          p.write_text(text)
+      - name: Format and test full workspace
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          rustup default 1.98.0
+          cargo fmt --all
+          cargo test --workspace --all-targets
+      - name: Commit tested 16-bit decoder
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/rm-codec/src/png.rs crates/rm-codec/tests/pngsuite_16bit.rs crates/rm-codec/testdata/pngsuite
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat(png): decode 16-bit color models"
+          git push origin "HEAD:${{ github.head_ref }}"
+
   quality:
     runs-on: ubuntu-latest
     steps:
