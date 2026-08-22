@@ -89,8 +89,14 @@ fn image2_sequence_searches_start_range_and_renumbers_output() {
         .unwrap();
     assert_success(&result);
 
-    assert_eq!(fs::read(dir.join("out-007.pgm")).unwrap(), b"P5\n1 1\n255\n\x95");
-    assert_eq!(fs::read(dir.join("out-008.pgm")).unwrap(), b"P5\n1 1\n255\n\x1d");
+    assert_eq!(
+        fs::read(dir.join("out-007.pgm")).unwrap(),
+        b"P5\n1 1\n255\n\x95"
+    );
+    assert_eq!(
+        fs::read(dir.join("out-008.pgm")).unwrap(),
+        b"P5\n1 1\n255\n\x1d"
+    );
     assert!(!dir.join("out-009.pgm").exists());
     fs::remove_dir_all(dir).unwrap();
 }

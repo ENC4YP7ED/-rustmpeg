@@ -10,7 +10,9 @@ use rm_core::{MediaError, Rational, Result};
 use rm_format::image2::ImagePattern;
 use rm_format::{WaveAudioInfo, mux_wave, parse_wave, probe_wave};
 
-use crate::image::{codec_for_path, decode_image, encode_image, is_image_codec, prepare_frame, probe_image};
+use crate::image::{
+    codec_for_path, decode_image, encode_image, is_image_codec, prepare_frame, probe_image,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CodecSelection {
@@ -176,7 +178,9 @@ fn run_wave(options: &Options, input: &Path, output: &Path) -> Result<()> {
     check_output(output, options)?;
     let input_bytes = fs::read(input)?;
     if probe_wave(&input_bytes) == 0 {
-        return Err(MediaError::invalid_data("forced WAVE input is not a WAVE file"));
+        return Err(MediaError::invalid_data(
+            "forced WAVE input is not a WAVE file",
+        ));
     }
     let wave = parse_wave(&input_bytes)?;
     let selection = options
@@ -347,9 +351,10 @@ fn run_image2(options: &Options, input: &Path, output: &Path) -> Result<()> {
         first_output_codec.get_or_insert(target_codec);
         fs::write(output_path, &encoded)?;
         total_bytes = total_bytes
-            .checked_add(u64::try_from(encoded.len()).map_err(|_| {
-                MediaError::overflow("encoded image size exceeds u64")
-            })?)
+            .checked_add(
+                u64::try_from(encoded.len())
+                    .map_err(|_| MediaError::overflow("encoded image size exceeds u64"))?,
+            )
             .ok_or_else(|| MediaError::overflow("total output size overflow"))?;
 
         if index == 0 {
@@ -377,9 +382,10 @@ fn run_image2(options: &Options, input: &Path, output: &Path) -> Result<()> {
     }
 
     let output_rate = options.output_framerate.unwrap_or(options.input_framerate);
-    let (width, height) = options.size.or(first_size).ok_or_else(|| {
-        MediaError::invalid_data("image2 sequence produced no frame dimensions")
-    })?;
+    let (width, height) = options
+        .size
+        .or(first_size)
+        .ok_or_else(|| MediaError::invalid_data("image2 sequence produced no frame dimensions"))?;
     eprintln!("Output #0, image2, to '{}':", output.display());
     eprintln!(
         "  Stream #0:0: Video: {}, {}x{}, {:.3} fps",
@@ -517,9 +523,10 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
                 ));
             }
             index += 1;
-            options.input_framerate = parse_rate(args.get(index).ok_or_else(|| {
-                MediaError::invalid_argument("missing framerate value")
-            })?)?;
+            options.input_framerate = parse_rate(
+                args.get(index)
+                    .ok_or_else(|| MediaError::invalid_argument("missing framerate value"))?,
+            )?;
         } else if is(arg, "-r") {
             index += 1;
             options.output_framerate = Some(parse_rate(args.get(index).ok_or_else(|| {
@@ -540,9 +547,10 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
             options.frame_limit = Some(value);
         } else if is(arg, "-s") || is(arg, "-s:v") {
             index += 1;
-            options.size = Some(parse_size(args.get(index).ok_or_else(|| {
-                MediaError::invalid_argument("missing video size")
-            })?)?);
+            options.size =
+                Some(parse_size(args.get(index).ok_or_else(|| {
+                    MediaError::invalid_argument("missing video size")
+                })?)?);
         } else if is(arg, "-c")
             || is(arg, "-codec")
             || is(arg, "-c:a")
@@ -667,11 +675,12 @@ fn parse_rate(value: &OsStr) -> Result<Rational> {
         if whole < 0 {
             return Err(MediaError::invalid_argument("frame rate must be positive"));
         }
-        let denominator = 10_i64
-            .checked_pow(u32::try_from(fraction.len()).map_err(|_| {
-                MediaError::overflow("frame-rate decimal precision exceeds u32")
-            })?)
-            .ok_or_else(|| MediaError::overflow("frame-rate denominator overflow"))?;
+        let denominator =
+            10_i64
+                .checked_pow(u32::try_from(fraction.len()).map_err(|_| {
+                    MediaError::overflow("frame-rate decimal precision exceeds u32")
+                })?)
+                .ok_or_else(|| MediaError::overflow("frame-rate denominator overflow"))?;
         let fraction = fraction
             .parse::<i64>()
             .map_err(|_| MediaError::invalid_argument("invalid decimal frame rate"))?;
@@ -783,8 +792,14 @@ mod tests {
 
     #[test]
     fn parses_fractional_and_decimal_frame_rates() {
-        assert_eq!(parse_rate(OsStr::new("30000/1001")).unwrap(), Rational::new(30000, 1001).unwrap());
-        assert_eq!(parse_rate(OsStr::new("29.97")).unwrap(), Rational::new(2997, 100).unwrap());
+        assert_eq!(
+            parse_rate(OsStr::new("30000/1001")).unwrap(),
+            Rational::new(30000, 1001).unwrap()
+        );
+        assert_eq!(
+            parse_rate(OsStr::new("29.97")).unwrap(),
+            Rational::new(2997, 100).unwrap()
+        );
     }
 
     #[test]

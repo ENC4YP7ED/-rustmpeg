@@ -39,7 +39,11 @@ impl ImagePattern {
         }
     }
 
-    pub fn collect_existing(&self, start_number: i64, limit: Option<usize>) -> Result<Vec<PathBuf>> {
+    pub fn collect_existing(
+        &self,
+        start_number: i64,
+        limit: Option<usize>,
+    ) -> Result<Vec<PathBuf>> {
         self.collect_existing_in_range(start_number, 1, limit)
     }
 
@@ -288,9 +292,7 @@ mod tests {
         fs::write(dir.join("f-003.ppm"), b"x").unwrap();
         fs::write(dir.join("f-004.ppm"), b"x").unwrap();
         let pattern = ImagePattern::parse(&dir.join("f-%03d.ppm")).unwrap();
-        let paths = pattern
-            .collect_existing_in_range(0, 5, Some(10))
-            .unwrap();
+        let paths = pattern.collect_existing_in_range(0, 5, Some(10)).unwrap();
         assert_eq!(paths.len(), 2);
         assert!(paths[0].ends_with("f-003.ppm"));
         fs::remove_dir_all(dir).unwrap();

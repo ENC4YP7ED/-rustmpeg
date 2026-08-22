@@ -40,7 +40,9 @@ pub fn probe_pnm(bytes: &[u8]) -> u8 {
 
 pub fn decode_pnm(bytes: &[u8]) -> Result<PnmImage> {
     if probe_pnm(bytes) == 0 {
-        return Err(MediaError::invalid_data("input is not a supported Netpbm image"));
+        return Err(MediaError::invalid_data(
+            "input is not a supported Netpbm image",
+        ));
     }
 
     let magic = bytes[1];
@@ -135,10 +137,10 @@ fn decode_ascii_samples(
 }
 
 fn decode_binary_pbm(data: &[u8], width: u32, height: u32) -> Result<PnmImage> {
-    let width_usize = usize::try_from(width)
-        .map_err(|_| MediaError::overflow("PBM width exceeds usize"))?;
-    let height_usize = usize::try_from(height)
-        .map_err(|_| MediaError::overflow("PBM height exceeds usize"))?;
+    let width_usize =
+        usize::try_from(width).map_err(|_| MediaError::overflow("PBM width exceeds usize"))?;
+    let height_usize =
+        usize::try_from(height).map_err(|_| MediaError::overflow("PBM height exceeds usize"))?;
     let row_bytes = width_usize
         .checked_add(7)
         .ok_or_else(|| MediaError::overflow("PBM row size overflow"))?
@@ -229,9 +231,10 @@ fn encode_pbm(frame: &VideoFrame) -> Result<Vec<u8>> {
         .ok_or_else(|| MediaError::overflow("PBM row size overflow"))?
         / 8;
     let raster_size = row_bytes
-        .checked_mul(usize::try_from(frame.height).map_err(|_| {
-            MediaError::overflow("PBM height exceeds usize")
-        })?)
+        .checked_mul(
+            usize::try_from(frame.height)
+                .map_err(|_| MediaError::overflow("PBM height exceeds usize"))?,
+        )
         .ok_or_else(|| MediaError::overflow("PBM raster size overflow"))?;
     let mut output = Vec::with_capacity(32 + raster_size);
     output.extend_from_slice(format!("P4\n{} {}\n", frame.width, frame.height).as_bytes());
@@ -445,7 +448,10 @@ mod tests {
             image.frame.data.as_slice(),
             &[0, 255, 0, 255, 0, 255, 0, 255, 0]
         );
-        assert_eq!(encode_pnm(PnmKind::Pbm, &image.frame).unwrap(), b"P4\n9 1\n\xAA\x80");
+        assert_eq!(
+            encode_pnm(PnmKind::Pbm, &image.frame).unwrap(),
+            b"P4\n9 1\n\xAA\x80"
+        );
     }
 
     #[test]

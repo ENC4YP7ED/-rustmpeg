@@ -211,9 +211,10 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
             }
         } else if is(arg, "-framerate") {
             index += 1;
-            options.framerate = parse_rate(args.get(index).ok_or_else(|| {
-                MediaError::invalid_argument("missing framerate value")
-            })?)?;
+            options.framerate = parse_rate(
+                args.get(index)
+                    .ok_or_else(|| MediaError::invalid_argument("missing framerate value"))?,
+            )?;
         } else if is(arg, "-v") || is(arg, "-loglevel") {
             index += 1;
             if index >= args.len() {
@@ -376,9 +377,21 @@ fn print_image_stream(
     println!("coded_width={}", image.frame.width);
     println!("coded_height={}", image.frame.height);
     println!("pix_fmt={}", image.frame.format.name());
-    println!("r_frame_rate={}/{}", framerate.numerator(), framerate.denominator());
-    println!("avg_frame_rate={}/{}", framerate.numerator(), framerate.denominator());
-    println!("time_base={}/{}", framerate.denominator(), framerate.numerator());
+    println!(
+        "r_frame_rate={}/{}",
+        framerate.numerator(),
+        framerate.denominator()
+    );
+    println!(
+        "avg_frame_rate={}/{}",
+        framerate.numerator(),
+        framerate.denominator()
+    );
+    println!(
+        "time_base={}/{}",
+        framerate.denominator(),
+        framerate.numerator()
+    );
     println!("duration_ts={frame_count}");
     println!("duration={duration:.6}");
     println!("nb_frames={frame_count}");

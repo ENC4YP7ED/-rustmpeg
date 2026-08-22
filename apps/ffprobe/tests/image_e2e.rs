@@ -39,7 +39,11 @@ fn single_ppm_reports_video_stream_and_image2_format() {
         .arg(&input)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("codec_name=ppm"));
     assert!(stdout.contains("codec_type=video"));
@@ -73,7 +77,11 @@ fn sequence_probe_uses_start_range_rate_and_frame_count() {
         .arg(dir.join("f-%03d.ppm"))
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("nb_frames=2"));
     assert!(stdout.contains("duration_ts=2"));
@@ -106,11 +114,7 @@ fn malformed_netpbm_fails_without_fake_metadata() {
     let input = dir.join("bad.ppm");
     fs::write(&input, b"P6\n2 2\n255\n\x00").unwrap();
 
-    let output = ffprobe()
-        .arg("-show_streams")
-        .arg(&input)
-        .output()
-        .unwrap();
+    let output = ffprobe().arg("-show_streams").arg(&input).output().unwrap();
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     fs::remove_dir_all(dir).unwrap();

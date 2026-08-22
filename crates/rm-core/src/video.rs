@@ -83,7 +83,9 @@ impl VideoFrame {
 
     pub fn row(&self, y: u32) -> Result<&[u8]> {
         if y >= self.height {
-            return Err(MediaError::invalid_argument("video frame row is out of bounds"));
+            return Err(MediaError::invalid_argument(
+                "video frame row is out of bounds",
+            ));
         }
         let start = usize::try_from(y)
             .map_err(|_| MediaError::overflow("video frame row index exceeds usize"))?

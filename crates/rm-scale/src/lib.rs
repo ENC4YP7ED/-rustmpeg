@@ -30,10 +30,10 @@ pub fn scale_nearest(frame: &VideoFrame, width: u32, height: u32) -> Result<Vide
     }
 
     let bytes_per_pixel = frame.format.bytes_per_pixel();
-    let target_width = usize::try_from(width)
-        .map_err(|_| MediaError::overflow("target width exceeds usize"))?;
-    let target_height = usize::try_from(height)
-        .map_err(|_| MediaError::overflow("target height exceeds usize"))?;
+    let target_width =
+        usize::try_from(width).map_err(|_| MediaError::overflow("target width exceeds usize"))?;
+    let target_height =
+        usize::try_from(height).map_err(|_| MediaError::overflow("target height exceeds usize"))?;
     let output_len = target_width
         .checked_mul(target_height)
         .and_then(|pixels| pixels.checked_mul(bytes_per_pixel))
@@ -42,14 +42,14 @@ pub fn scale_nearest(frame: &VideoFrame, width: u32, height: u32) -> Result<Vide
 
     for y in 0..target_height {
         let source_y = y
-            .checked_mul(usize::try_from(frame.height).map_err(|_| {
-                MediaError::overflow("source height exceeds usize")
-            })?)
+            .checked_mul(
+                usize::try_from(frame.height)
+                    .map_err(|_| MediaError::overflow("source height exceeds usize"))?,
+            )
             .ok_or_else(|| MediaError::overflow("vertical scale coordinate overflow"))?
             / target_height;
         let source_row = frame.row(
-            u32::try_from(source_y)
-                .map_err(|_| MediaError::overflow("source row exceeds u32"))?,
+            u32::try_from(source_y).map_err(|_| MediaError::overflow("source row exceeds u32"))?,
         )?;
         let output_row_start = y
             .checked_mul(target_width)
@@ -58,18 +58,20 @@ pub fn scale_nearest(frame: &VideoFrame, width: u32, height: u32) -> Result<Vide
 
         for x in 0..target_width {
             let source_x = x
-                .checked_mul(usize::try_from(frame.width).map_err(|_| {
-                    MediaError::overflow("source width exceeds usize")
-                })?)
+                .checked_mul(
+                    usize::try_from(frame.width)
+                        .map_err(|_| MediaError::overflow("source width exceeds usize"))?,
+                )
                 .ok_or_else(|| MediaError::overflow("horizontal scale coordinate overflow"))?
                 / target_width;
             let source_offset = source_x
                 .checked_mul(bytes_per_pixel)
                 .ok_or_else(|| MediaError::overflow("source pixel offset overflow"))?;
             let output_offset = output_row_start
-                .checked_add(x.checked_mul(bytes_per_pixel).ok_or_else(|| {
-                    MediaError::overflow("output pixel offset overflow")
-                })?)
+                .checked_add(
+                    x.checked_mul(bytes_per_pixel)
+                        .ok_or_else(|| MediaError::overflow("output pixel offset overflow"))?,
+                )
                 .ok_or_else(|| MediaError::overflow("output pixel offset overflow"))?;
             output[output_offset..output_offset + bytes_per_pixel]
                 .copy_from_slice(&source_row[source_offset..source_offset + bytes_per_pixel]);
@@ -113,8 +115,7 @@ fn rgb_to_gray(frame: &VideoFrame) -> Result<VideoFrame> {
         let blue = u32::from(pixel[2]);
         let luma = (77 * red + 150 * green + 29 * blue + 128) >> 8;
         output.push(
-            u8::try_from(luma)
-                .map_err(|_| MediaError::overflow("computed luma exceeds u8"))?,
+            u8::try_from(luma).map_err(|_| MediaError::overflow("computed luma exceeds u8"))?,
         );
     }
     VideoFrame::from_vec(frame.width, frame.height, PixelFormat::Gray8, output)
