@@ -26,7 +26,7 @@ pub fn probe_png(bytes: &[u8]) -> u8 {
     }
 }
 
-/// Decodes a non-interlaced 8-bit grayscale or RGB PNG image.
+/// Decodes non-interlaced 8-bit grayscale, RGB, gray+alpha, or RGBA PNG images.
 ///
 /// # Errors
 ///
@@ -166,7 +166,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
     decode_scanlines(header, &idat)
 }
 
-/// Encodes an 8-bit grayscale or RGB frame as a non-interlaced PNG.
+/// Encodes an 8-bit grayscale, RGB, gray+alpha, or RGBA frame as a non-interlaced PNG.
 ///
 /// The baseline encoder emits filter type 0 scanlines and repository-owned zlib
 /// stored blocks. This is standards-compliant but intentionally not yet size
@@ -179,6 +179,8 @@ pub fn encode_png(frame: &VideoFrame) -> Result<Vec<u8>> {
     let color_type = match frame.format {
         PixelFormat::Gray8 => 0_u8,
         PixelFormat::Rgb24 => 2_u8,
+        PixelFormat::GrayAlpha8 => 4_u8,
+        PixelFormat::Rgba32 => 6_u8,
     };
     let stride = frame
         .format
@@ -247,7 +249,7 @@ fn parse_ihdr(data: &[u8]) -> Result<Ihdr> {
             header.bit_depth
         )));
     }
-    if !matches!(header.color_type, 0 | 2) {
+    if !matches!(header.color_type, 0 | 2 | 4 | 6) {
         return Err(MediaError::unsupported(format!(
             "PNG color type {} is not implemented yet",
             header.color_type
@@ -273,6 +275,8 @@ fn decode_scanlines(header: Ihdr, compressed: &[u8]) -> Result<VideoFrame> {
     let (format, bytes_per_pixel) = match header.color_type {
         0 => (PixelFormat::Gray8, 1_usize),
         2 => (PixelFormat::Rgb24, 3_usize),
+        4 => (PixelFormat::GrayAlpha8, 2_usize),
+        6 => (PixelFormat::Rgba32, 4_usize),
         _ => return Err(MediaError::unsupported("unsupported PNG color type")),
     };
     let width = usize::try_from(header.width)

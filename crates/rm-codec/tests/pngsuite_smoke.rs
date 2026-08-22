@@ -23,12 +23,17 @@ fn decode_base64(input: &str) -> Vec<u8> {
     for chunk in clean.chunks_exact(4) {
         let a = value(chunk[0]).unwrap();
         let b = value(chunk[1]).unwrap();
-        let c = if chunk[2] == b'=' { 0 } else { value(chunk[2]).unwrap() };
-        let d = if chunk[3] == b'=' { 0 } else { value(chunk[3]).unwrap() };
-        let word = (u32::from(a) << 18)
-            | (u32::from(b) << 12)
-            | (u32::from(c) << 6)
-            | u32::from(d);
+        let c = if chunk[2] == b'=' {
+            0
+        } else {
+            value(chunk[2]).unwrap()
+        };
+        let d = if chunk[3] == b'=' {
+            0
+        } else {
+            value(chunk[3]).unwrap()
+        };
+        let word = (u32::from(a) << 18) | (u32::from(b) << 12) | (u32::from(c) << 6) | u32::from(d);
         output.push((word >> 16) as u8);
         if chunk[2] != b'=' {
             output.push((word >> 8) as u8);
@@ -49,19 +54,34 @@ const BASN3P08: &str = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAABGdBTUEA
 #[test]
 fn pngsuite_existing_8_bit_gray_and_rgb_paths_decode() {
     let gray = decode_png(&decode_base64(BASN0G08)).unwrap();
-    assert_eq!((gray.width, gray.height, gray.format), (32, 32, PixelFormat::Gray8));
+    assert_eq!(
+        (gray.width, gray.height, gray.format),
+        (32, 32, PixelFormat::Gray8)
+    );
 
     let rgb = decode_png(&decode_base64(BASN2C08)).unwrap();
-    assert_eq!((rgb.width, rgb.height, rgb.format), (32, 32, PixelFormat::Rgb24));
+    assert_eq!(
+        (rgb.width, rgb.height, rgb.format),
+        (32, 32, PixelFormat::Rgb24)
+    );
 }
 
 #[test]
-fn pngsuite_vectors_expose_current_color_model_gaps() {
-    for (name, vector) in [
-        ("basn4a08 gray+alpha", BASN4A08),
-        ("basn6a08 rgba", BASN6A08),
-        ("basn3p08 palette", BASN3P08),
-    ] {
-        assert!(decode_png(&decode_base64(vector)).is_err(), "{name} unexpectedly decoded before support was implemented");
-    }
+fn pngsuite_8_bit_alpha_paths_decode() {
+    let gray_alpha = decode_png(&decode_base64(BASN4A08)).unwrap();
+    assert_eq!(
+        (gray_alpha.width, gray_alpha.height, gray_alpha.format),
+        (32, 32, PixelFormat::GrayAlpha8)
+    );
+
+    let rgba = decode_png(&decode_base64(BASN6A08)).unwrap();
+    assert_eq!(
+        (rgba.width, rgba.height, rgba.format),
+        (32, 32, PixelFormat::Rgba32)
+    );
+}
+
+#[test]
+fn pngsuite_palette_remains_an_explicit_gap() {
+    assert!(decode_png(&decode_base64(BASN3P08)).is_err());
 }
