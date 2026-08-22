@@ -369,7 +369,11 @@ impl<'a> Tokenizer<'a> {
             if self.bytes[self.position] == b'#' {
                 self.skip_comment();
             } else {
+                let delimiter = self.bytes[self.position];
                 self.position += 1;
+                if delimiter == b'\r' && self.bytes.get(self.position) == Some(&b'\n') {
+                    self.position += 1;
+                }
             }
         }
         Ok(token)
