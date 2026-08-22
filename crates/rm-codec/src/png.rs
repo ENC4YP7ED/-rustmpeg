@@ -302,16 +302,23 @@ fn parse_ihdr(data: &[u8]) -> Result<Ihdr> {
             "PNG image has {pixels} pixels; limit is {MAX_PIXELS}"
         )));
     }
-    if header.bit_depth != 8 {
-        return Err(MediaError::unsupported(format!(
-            "PNG bit depth {} is not implemented yet",
-            header.bit_depth
-        )));
-    }
     if !matches!(header.color_type, 0 | 2 | 3 | 4 | 6) {
         return Err(MediaError::unsupported(format!(
             "PNG color type {} is not implemented yet",
             header.color_type
+        )));
+    }
+    let valid_bit_depth = match header.color_type {
+        0 => matches!(header.bit_depth, 1 | 2 | 4 | 8),
+        2 => header.bit_depth == 8,
+        3 => matches!(header.bit_depth, 1 | 2 | 4 | 8),
+        4 | 6 => header.bit_depth == 8,
+        _ => false,
+    };
+    if !valid_bit_depth {
+        return Err(MediaError::unsupported(format!(
+            "PNG bit depth {} is not implemented for color type {}",
+            header.bit_depth, header.color_type
         )));
     }
     if header.compression_method != 0 {
@@ -338,6 +345,9 @@ fn decode_scanlines(
 ) -> Result<VideoFrame> {
     if header.color_type == 3 {
         return decode_indexed_scanlines(header, compressed, palette, transparency);
+    }
+    if header.color_type == 0 && header.bit_depth < 8 {
+        return decode_packed_grayscale_scanlines(header, compressed);
     }
 
     let (format, bytes_per_pixel) = match header.color_type {
@@ -402,37 +412,20 @@ fn decode_indexed_scanlines(
         .map_err(|_| MediaError::overflow("PNG width exceeds usize"))?;
     let height = usize::try_from(header.height)
         .map_err(|_| MediaError::overflow("PNG height exceeds usize"))?;
-    let encoded_row = width
-        .checked_add(1)
-        .ok_or_else(|| MediaError::overflow("PNG indexed row size overflow"))?;
-    let expected_size = encoded_row
-        .checked_mul(height)
-        .ok_or_else(|| MediaError::overflow("PNG indexed decompressed size overflow"))?;
-    let filtered = zlib::decompress(compressed, expected_size)?;
-    if filtered.len() != expected_size {
-        return Err(MediaError::invalid_data(format!(
-            "PNG decompressed data has {} bytes but {expected_size} are required",
-            filtered.len()
-        )));
-    }
+    let packed_stride = packed_row_bytes(width, header.bit_depth)?;
+    let packed = decode_packed_rows(compressed, packed_stride, height, 1)?;
 
     let index_count = width
         .checked_mul(height)
         .ok_or_else(|| MediaError::overflow("PNG indexed pixel count overflow"))?;
-    let mut indices = vec![0_u8; index_count];
-    for row_index in 0..height {
-        let encoded_start = row_index * encoded_row;
-        let filter = filtered[encoded_start];
-        let raw = &filtered[encoded_start + 1..encoded_start + encoded_row];
-        let output_start = row_index * width;
-        let (before, current_and_after) = indices.split_at_mut(output_start);
-        let current = &mut current_and_after[..width];
-        let previous = if row_index == 0 {
-            None
-        } else {
-            Some(&before[before.len() - width..])
-        };
-        unfilter_row(filter, raw, current, previous, 1)?;
+    let mut indices = Vec::with_capacity(index_count);
+    for row in packed.chunks_exact(packed_stride) {
+        unpack_samples(row, width, header.bit_depth, &mut indices)?;
+    }
+    if indices.len() != index_count {
+        return Err(MediaError::invalid_data(
+            "PNG indexed sample count mismatch",
+        ));
     }
 
     let has_alpha = transparency.is_some();
@@ -461,6 +454,108 @@ fn decode_indexed_scanlines(
     }
 
     VideoFrame::from_vec(header.width, header.height, format, output)
+}
+
+fn decode_packed_grayscale_scanlines(header: Ihdr, compressed: &[u8]) -> Result<VideoFrame> {
+    let width = usize::try_from(header.width)
+        .map_err(|_| MediaError::overflow("PNG width exceeds usize"))?;
+    let height = usize::try_from(header.height)
+        .map_err(|_| MediaError::overflow("PNG height exceeds usize"))?;
+    let packed_stride = packed_row_bytes(width, header.bit_depth)?;
+    let packed = decode_packed_rows(compressed, packed_stride, height, 1)?;
+    let pixel_count = width
+        .checked_mul(height)
+        .ok_or_else(|| MediaError::overflow("PNG grayscale pixel count overflow"))?;
+    let mut samples = Vec::with_capacity(pixel_count);
+    for row in packed.chunks_exact(packed_stride) {
+        unpack_samples(row, width, header.bit_depth, &mut samples)?;
+    }
+    if samples.len() != pixel_count {
+        return Err(MediaError::invalid_data(
+            "PNG grayscale sample count mismatch",
+        ));
+    }
+
+    let max = (1_u16 << header.bit_depth) - 1;
+    for sample in &mut samples {
+        let scaled = (u16::from(*sample) * 255 + max / 2) / max;
+        *sample = u8::try_from(scaled)
+            .map_err(|_| MediaError::overflow("PNG grayscale scaling exceeds u8"))?;
+    }
+    VideoFrame::from_vec(header.width, header.height, PixelFormat::Gray8, samples)
+}
+
+fn packed_row_bytes(width: usize, bit_depth: u8) -> Result<usize> {
+    let bits = width
+        .checked_mul(usize::from(bit_depth))
+        .ok_or_else(|| MediaError::overflow("PNG packed row bit count overflow"))?;
+    bits.checked_add(7)
+        .map(|value| value / 8)
+        .ok_or_else(|| MediaError::overflow("PNG packed row byte count overflow"))
+}
+
+fn decode_packed_rows(
+    compressed: &[u8],
+    stride: usize,
+    height: usize,
+    filter_bytes_per_pixel: usize,
+) -> Result<Vec<u8>> {
+    let encoded_row = stride
+        .checked_add(1)
+        .ok_or_else(|| MediaError::overflow("PNG packed encoded row size overflow"))?;
+    let expected_size = encoded_row
+        .checked_mul(height)
+        .ok_or_else(|| MediaError::overflow("PNG packed decompressed size overflow"))?;
+    let filtered = zlib::decompress(compressed, expected_size)?;
+    if filtered.len() != expected_size {
+        return Err(MediaError::invalid_data(format!(
+            "PNG decompressed data has {} bytes but {expected_size} are required",
+            filtered.len()
+        )));
+    }
+
+    let output_size = stride
+        .checked_mul(height)
+        .ok_or_else(|| MediaError::overflow("PNG packed raster size overflow"))?;
+    let mut output = vec![0_u8; output_size];
+    for row_index in 0..height {
+        let encoded_start = row_index * encoded_row;
+        let filter = filtered[encoded_start];
+        let raw = &filtered[encoded_start + 1..encoded_start + encoded_row];
+        let output_start = row_index * stride;
+        let (before, current_and_after) = output.split_at_mut(output_start);
+        let current = &mut current_and_after[..stride];
+        let previous = if row_index == 0 {
+            None
+        } else {
+            Some(&before[before.len() - stride..])
+        };
+        unfilter_row(filter, raw, current, previous, filter_bytes_per_pixel)?;
+    }
+    Ok(output)
+}
+
+fn unpack_samples(row: &[u8], width: usize, bit_depth: u8, output: &mut Vec<u8>) -> Result<()> {
+    if !matches!(bit_depth, 1 | 2 | 4 | 8) {
+        return Err(MediaError::unsupported("unsupported packed PNG bit depth"));
+    }
+    let mask = (1_u16 << bit_depth) - 1;
+    for pixel in 0..width {
+        let bit_offset = pixel
+            .checked_mul(usize::from(bit_depth))
+            .ok_or_else(|| MediaError::overflow("PNG packed sample offset overflow"))?;
+        let byte_index = bit_offset / 8;
+        let within_byte = bit_offset % 8;
+        let shift = 8_usize
+            .checked_sub(usize::from(bit_depth))
+            .and_then(|value| value.checked_sub(within_byte))
+            .ok_or_else(|| MediaError::invalid_data("PNG packed sample crosses byte boundary"))?;
+        let byte = *row
+            .get(byte_index)
+            .ok_or_else(|| MediaError::invalid_data("PNG packed row is truncated"))?;
+        output.push(((u16::from(byte) >> shift) & mask) as u8);
+    }
+    Ok(())
 }
 
 fn unfilter_row(

@@ -23,12 +23,17 @@ fn decode_base64(input: &str) -> Vec<u8> {
     for chunk in clean.chunks_exact(4) {
         let a = value(chunk[0]).unwrap();
         let b = value(chunk[1]).unwrap();
-        let c = if chunk[2] == b'=' { 0 } else { value(chunk[2]).unwrap() };
-        let d = if chunk[3] == b'=' { 0 } else { value(chunk[3]).unwrap() };
-        let word = (u32::from(a) << 18)
-            | (u32::from(b) << 12)
-            | (u32::from(c) << 6)
-            | u32::from(d);
+        let c = if chunk[2] == b'=' {
+            0
+        } else {
+            value(chunk[2]).unwrap()
+        };
+        let d = if chunk[3] == b'=' {
+            0
+        } else {
+            value(chunk[3]).unwrap()
+        };
+        let word = (u32::from(a) << 18) | (u32::from(b) << 12) | (u32::from(c) << 6) | u32::from(d);
         output.push((word >> 16) as u8);
         if chunk[2] != b'=' {
             output.push((word >> 8) as u8);
