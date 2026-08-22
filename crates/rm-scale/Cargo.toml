@@ -1,14 +1,11 @@
 [package]
-name = "rm-cli"
+name = "rm-scale"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
 rm-core = { path = "../rm-core" }
-rm-codec = { path = "../rm-codec" }
-rm-format = { path = "../rm-format" }
-rm-scale = { path = "../rm-scale" }
 
 [lints]
 workspace = true

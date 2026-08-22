@@ -37,19 +37,20 @@ fn tolerance(codec: CodecId) -> f64 {
         CodecId::PcmS32Le => 1.0 / 2_147_483_648.0 + 1.0e-12,
         CodecId::PcmF32Le => 1.0e-6,
         CodecId::PcmF64Le => 1.0e-12,
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => unreachable!("PCM test received image codec"),
     }
 }
 
 #[test]
 fn every_pcm_pair_converts_with_expected_output_length() {
     for input in CODECS {
-        let input_width = pcm_bytes_per_sample(input);
+        let input_width = pcm_bytes_per_sample(input).unwrap();
         let source = vec![0_u8; input_width * 8];
         for output in CODECS {
             let converted = convert_pcm(input, output, 2, &source).unwrap();
             assert_eq!(
                 converted.len(),
-                pcm_bytes_per_sample(output) * 8,
+                pcm_bytes_per_sample(output).unwrap() * 8,
                 "length mismatch for {input:?} -> {output:?}"
             );
         }
@@ -100,7 +101,7 @@ fn interleaved_stereo_sample_order_is_preserved() {
 #[test]
 fn malformed_interleaved_frames_are_rejected_for_every_codec() {
     for codec in CODECS {
-        let width = pcm_bytes_per_sample(codec);
+        let width = pcm_bytes_per_sample(codec).unwrap();
         let malformed = vec![0_u8; width * 2 - 1];
         assert!(
             convert_pcm(codec, CodecId::PcmS16Le, 2, &malformed).is_err(),

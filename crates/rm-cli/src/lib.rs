@@ -2,6 +2,7 @@
 
 mod ffmpeg;
 mod ffprobe;
+mod image;
 
 use std::ffi::OsString;
 

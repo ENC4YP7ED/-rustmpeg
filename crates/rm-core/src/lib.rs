@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod video;
+
 use std::fmt;
 use std::sync::Arc;
 

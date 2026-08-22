@@ -13,13 +13,16 @@ const CODECS: [CodecId; 6] = [
 fn wave_tag(codec: CodecId) -> u16 {
     match codec {
         CodecId::PcmF32Le | CodecId::PcmF64Le => 3,
-        _ => 1,
+        CodecId::PcmU8 | CodecId::PcmS16Le | CodecId::PcmS24Le | CodecId::PcmS32Le => 1,
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => {
+            unreachable!("WAVE matrix received image codec")
+        }
     }
 }
 
 fn audio_info(codec: CodecId, channels: u16, sample_rate: u32) -> WaveAudioInfo {
-    let bits = pcm_bits_per_sample(codec);
-    let block_align = (pcm_bytes_per_sample(codec) * usize::from(channels)) as u16;
+    let bits = pcm_bits_per_sample(codec).unwrap();
+    let block_align = (pcm_bytes_per_sample(codec).unwrap() * usize::from(channels)) as u16;
     WaveAudioInfo {
         codec,
         channels,
@@ -42,8 +45,8 @@ fn push_chunk(output: &mut Vec<u8>, id: &[u8; 4], payload: &[u8]) {
 }
 
 fn manual_wave(codec: CodecId, channels: u16, sample_rate: u32, data: &[u8]) -> Vec<u8> {
-    let bits = pcm_bits_per_sample(codec);
-    let block_align = (pcm_bytes_per_sample(codec) * usize::from(channels)) as u16;
+    let bits = pcm_bits_per_sample(codec).unwrap();
+    let block_align = (pcm_bytes_per_sample(codec).unwrap() * usize::from(channels)) as u16;
     let byte_rate = sample_rate * u32::from(block_align);
     let mut body = Vec::new();
     let mut fmt = Vec::new();

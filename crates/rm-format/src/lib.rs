@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod image2;
+
 use rm_codec::{CodecId, pcm_bits_per_sample, pcm_from_wave_tag, pcm_wave_format_tag};
 use rm_core::{MediaError, Result};
 use rm_io::{ByteReader, ByteWriter};
@@ -13,13 +15,22 @@ pub struct FormatDescriptor {
     pub can_mux: bool,
 }
 
-const FORMATS: [FormatDescriptor; 1] = [FormatDescriptor {
-    name: "wav",
-    long_name: "WAV / WAVE (Waveform Audio)",
-    extensions: &["wav", "wave"],
-    can_demux: true,
-    can_mux: true,
-}];
+const FORMATS: [FormatDescriptor; 2] = [
+    FormatDescriptor {
+        name: "wav",
+        long_name: "WAV / WAVE (Waveform Audio)",
+        extensions: &["wav", "wave"],
+        can_demux: true,
+        can_mux: true,
+    },
+    FormatDescriptor {
+        name: "image2",
+        long_name: "image2 sequence",
+        extensions: &["pbm", "pgm", "ppm", "pnm"],
+        can_demux: true,
+        can_mux: true,
+    },
+];
 
 #[must_use]
 pub const fn formats() -> &'static [FormatDescriptor] {
@@ -254,7 +265,7 @@ fn validate_wave_audio(audio: WaveAudioInfo) -> Result<()> {
             "invalid WAVE valid-bits-per-sample value",
         ));
     }
-    if pcm_bits_per_sample(audio.codec) != audio.bits_per_sample {
+    if pcm_bits_per_sample(audio.codec) != Some(audio.bits_per_sample) {
         return Err(MediaError::invalid_data(
             "WAVE codec and bits-per-sample disagree",
         ));
@@ -287,6 +298,8 @@ pub fn mux_wave(audio: WaveAudioInfo, data: &[u8]) -> Result<Vec<u8>> {
         ));
     }
 
+    let format_tag = pcm_wave_format_tag(audio.codec)
+        .ok_or_else(|| MediaError::invalid_argument("WAVE muxer requires a PCM codec"))?;
     let data_size = u32::try_from(data.len()).map_err(|_| {
         MediaError::unsupported(
             "classic RIFF/WAVE output is limited to 4 GiB; RF64 is not implemented yet",
@@ -312,7 +325,7 @@ pub fn mux_wave(audio: WaveAudioInfo, data: &[u8]) -> Result<Vec<u8>> {
     writer.write(b"WAVE");
     writer.write(b"fmt ");
     writer.write_u32_le(16);
-    writer.write_u16_le(pcm_wave_format_tag(audio.codec));
+    writer.write_u16_le(format_tag);
     writer.write_u16_le(audio.channels);
     writer.write_u32_le(audio.sample_rate);
     writer.write_u32_le(audio.byte_rate);
@@ -366,5 +379,12 @@ mod tests {
     #[test]
     fn misaligned_pcm_payload_is_rejected() {
         assert!(mux_wave(stereo_s16(), &[0, 0]).is_err());
+    }
+
+    #[test]
+    fn image_codec_cannot_be_muxed_as_wave() {
+        let mut audio = stereo_s16();
+        audio.codec = CodecId::Ppm;
+        assert!(mux_wave(audio, &[0, 0, 0, 0]).is_err());
     }
 }

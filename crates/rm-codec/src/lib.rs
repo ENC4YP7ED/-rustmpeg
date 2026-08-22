@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod pnm;
+
 use rm_core::{MediaError, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,6 +21,9 @@ pub enum CodecId {
     PcmS32Le,
     PcmF32Le,
     PcmF64Le,
+    Pbm,
+    Pgm,
+    Ppm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +36,7 @@ pub struct CodecDescriptor {
     pub can_encode: bool,
 }
 
-const PCM_CODECS: [CodecDescriptor; 6] = [
+const CODECS: [CodecDescriptor; 9] = [
     CodecDescriptor {
         id: CodecId::PcmU8,
         name: "pcm_u8",
@@ -80,27 +85,71 @@ const PCM_CODECS: [CodecDescriptor; 6] = [
         can_decode: true,
         can_encode: true,
     },
+    CodecDescriptor {
+        id: CodecId::Pbm,
+        name: "pbm",
+        long_name: "PBM (Portable BitMap) image",
+        media_type: MediaType::Video,
+        can_decode: true,
+        can_encode: true,
+    },
+    CodecDescriptor {
+        id: CodecId::Pgm,
+        name: "pgm",
+        long_name: "PGM (Portable GrayMap) image",
+        media_type: MediaType::Video,
+        can_decode: true,
+        can_encode: true,
+    },
+    CodecDescriptor {
+        id: CodecId::Ppm,
+        name: "ppm",
+        long_name: "PPM (Portable PixelMap) image",
+        media_type: MediaType::Video,
+        can_decode: true,
+        can_encode: true,
+    },
 ];
 
 #[must_use]
 pub const fn codecs() -> &'static [CodecDescriptor] {
-    &PCM_CODECS
+    &CODECS
 }
 
 #[must_use]
-pub fn descriptor(id: CodecId) -> &'static CodecDescriptor {
-    PCM_CODECS
-        .iter()
-        .find(|descriptor| descriptor.id == id)
-        .expect("every CodecId must have a descriptor")
+pub const fn descriptor(id: CodecId) -> &'static CodecDescriptor {
+    match id {
+        CodecId::PcmU8 => &CODECS[0],
+        CodecId::PcmS16Le => &CODECS[1],
+        CodecId::PcmS24Le => &CODECS[2],
+        CodecId::PcmS32Le => &CODECS[3],
+        CodecId::PcmF32Le => &CODECS[4],
+        CodecId::PcmF64Le => &CODECS[5],
+        CodecId::Pbm => &CODECS[6],
+        CodecId::Pgm => &CODECS[7],
+        CodecId::Ppm => &CODECS[8],
+    }
 }
 
 #[must_use]
 pub fn find_by_name(name: &str) -> Option<CodecId> {
-    PCM_CODECS
+    CODECS
         .iter()
         .find(|descriptor| descriptor.name.eq_ignore_ascii_case(name))
         .map(|descriptor| descriptor.id)
+}
+
+#[must_use]
+pub const fn is_pcm(id: CodecId) -> bool {
+    matches!(
+        id,
+        CodecId::PcmU8
+            | CodecId::PcmS16Le
+            | CodecId::PcmS24Le
+            | CodecId::PcmS32Le
+            | CodecId::PcmF32Le
+            | CodecId::PcmF64Le
+    )
 }
 
 #[must_use]
@@ -117,26 +166,31 @@ pub const fn pcm_from_wave_tag(format_tag: u16, bits_per_sample: u16) -> Option<
 }
 
 #[must_use]
-pub const fn pcm_bits_per_sample(id: CodecId) -> u16 {
+pub const fn pcm_bits_per_sample(id: CodecId) -> Option<u16> {
     match id {
-        CodecId::PcmU8 => 8,
-        CodecId::PcmS16Le => 16,
-        CodecId::PcmS24Le => 24,
-        CodecId::PcmS32Le | CodecId::PcmF32Le => 32,
-        CodecId::PcmF64Le => 64,
+        CodecId::PcmU8 => Some(8),
+        CodecId::PcmS16Le => Some(16),
+        CodecId::PcmS24Le => Some(24),
+        CodecId::PcmS32Le | CodecId::PcmF32Le => Some(32),
+        CodecId::PcmF64Le => Some(64),
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => None,
     }
 }
 
 #[must_use]
-pub const fn pcm_bytes_per_sample(id: CodecId) -> usize {
-    (pcm_bits_per_sample(id) / 8) as usize
+pub const fn pcm_bytes_per_sample(id: CodecId) -> Option<usize> {
+    match pcm_bits_per_sample(id) {
+        Some(bits) => Some((bits / 8) as usize),
+        None => None,
+    }
 }
 
 #[must_use]
-pub const fn pcm_wave_format_tag(id: CodecId) -> u16 {
+pub const fn pcm_wave_format_tag(id: CodecId) -> Option<u16> {
     match id {
-        CodecId::PcmF32Le | CodecId::PcmF64Le => 3,
-        CodecId::PcmU8 | CodecId::PcmS16Le | CodecId::PcmS24Le | CodecId::PcmS32Le => 1,
+        CodecId::PcmF32Le | CodecId::PcmF64Le => Some(3),
+        CodecId::PcmU8 | CodecId::PcmS16Le | CodecId::PcmS24Le | CodecId::PcmS32Le => Some(1),
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => None,
     }
 }
 
@@ -147,17 +201,18 @@ pub fn convert_pcm(input: CodecId, output: CodecId, channels: u16, data: &[u8]) 
         ));
     }
 
-    let input_width = pcm_bytes_per_sample(input);
-    let output_width = pcm_bytes_per_sample(output);
+    let input_width = pcm_bytes_per_sample(input)
+        .ok_or_else(|| MediaError::invalid_argument("input codec is not PCM"))?;
+    let output_width = pcm_bytes_per_sample(output)
+        .ok_or_else(|| MediaError::invalid_argument("output codec is not PCM"))?;
     let input_frame_size = input_width
         .checked_mul(usize::from(channels))
         .ok_or_else(|| MediaError::overflow("PCM input frame size overflow"))?;
-    if data.len() % input_frame_size != 0 {
+    if !data.len().is_multiple_of(input_frame_size) {
         return Err(MediaError::invalid_data(
             "PCM input does not contain complete interleaved sample frames",
         ));
     }
-
     if input == output {
         return Ok(data.to_vec());
     }
@@ -169,15 +224,15 @@ pub fn convert_pcm(input: CodecId, output: CodecId, channels: u16, data: &[u8]) 
     let mut converted = Vec::with_capacity(output_size);
 
     for sample in data.chunks_exact(input_width) {
-        let normalized = decode_sample(input, sample);
-        encode_sample(output, normalized, &mut converted);
+        let normalized = decode_sample(input, sample)?;
+        encode_sample(output, normalized, &mut converted)?;
     }
 
     Ok(converted)
 }
 
-fn decode_sample(codec: CodecId, bytes: &[u8]) -> f64 {
-    match codec {
+fn decode_sample(codec: CodecId, bytes: &[u8]) -> Result<f64> {
+    let value = match codec {
         CodecId::PcmU8 => (f64::from(bytes[0]) - 128.0) / 128.0,
         CodecId::PcmS16Le => f64::from(i16::from_le_bytes([bytes[0], bytes[1]])) / 32_768.0,
         CodecId::PcmS24Le => {
@@ -196,10 +251,14 @@ fn decode_sample(codec: CodecId, bytes: &[u8]) -> f64 {
         CodecId::PcmF64Le => f64::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ]),
-    }
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => {
+            return Err(MediaError::invalid_argument("codec is not PCM"));
+        }
+    };
+    Ok(value)
 }
 
-fn encode_sample(codec: CodecId, sample: f64, output: &mut Vec<u8>) {
+fn encode_sample(codec: CodecId, sample: f64, output: &mut Vec<u8>) -> Result<()> {
     match codec {
         CodecId::PcmU8 => {
             let sample = sanitize(sample).clamp(-1.0, 1.0);
@@ -232,7 +291,11 @@ fn encode_sample(codec: CodecId, sample: f64, output: &mut Vec<u8>) {
         }
         CodecId::PcmF32Le => output.extend_from_slice(&(sanitize(sample) as f32).to_le_bytes()),
         CodecId::PcmF64Le => output.extend_from_slice(&sanitize(sample).to_le_bytes()),
+        CodecId::Pbm | CodecId::Pgm | CodecId::Ppm => {
+            return Err(MediaError::invalid_argument("codec is not PCM"));
+        }
     }
+    Ok(())
 }
 
 fn sanitize(sample: f64) -> f64 {
@@ -263,12 +326,17 @@ mod tests {
     }
 
     #[test]
-    fn every_codec_has_a_stable_ffmpeg_style_name() {
-        for codec in codecs() {
-            assert!(!codec.name.is_empty());
-            assert!(codec.can_decode);
-            assert!(codec.can_encode);
-        }
+    fn registry_contains_audio_and_video_codecs() {
+        assert_eq!(descriptor(CodecId::Ppm).media_type, MediaType::Video);
+        assert_eq!(descriptor(CodecId::PcmS16Le).media_type, MediaType::Audio);
+        assert_eq!(find_by_name("ppm"), Some(CodecId::Ppm));
+    }
+
+    #[test]
+    fn pcm_metadata_rejects_image_codecs() {
+        assert_eq!(pcm_bits_per_sample(CodecId::Pgm), None);
+        assert_eq!(pcm_bytes_per_sample(CodecId::Ppm), None);
+        assert_eq!(pcm_wave_format_tag(CodecId::Pbm), None);
     }
 
     #[test]
@@ -278,6 +346,12 @@ mod tests {
             convert_pcm(CodecId::PcmS16Le, CodecId::PcmS16Le, 1, &source).unwrap(),
             source
         );
+    }
+
+    #[test]
+    fn non_pcm_conversion_is_rejected() {
+        assert!(convert_pcm(CodecId::Ppm, CodecId::PcmU8, 1, &[]).is_err());
+        assert!(convert_pcm(CodecId::PcmU8, CodecId::Pgm, 1, &[]).is_err());
     }
 
     #[test]

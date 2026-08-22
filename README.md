@@ -2,7 +2,7 @@
 
 A clean-room, from-scratch multimedia framework in Rust targeting command-line and functional parity with FFmpeg while keeping the Rust source tree free of third-party crate dependencies.
 
-> Status: bootstrap. This repository does **not** claim FFmpeg feature parity yet. Parity is earned subsystem-by-subsystem and tracked explicitly.
+> Status: early implementation. This repository does **not** claim FFmpeg feature parity yet. Parity is earned subsystem-by-subsystem and tracked explicitly.
 
 ## Baseline
 
@@ -105,30 +105,30 @@ Protocol -> buffered IO -> probe -> demux -> packet
 ### Phase 0 — bootstrap and contracts
 
 - [x] Repository and parity contract
-- [ ] Rust workspace with zero-dependency enforcement
-- [ ] Shared error/rational/time model
-- [ ] byte and bit readers/writers
-- [ ] capability registry
-- [ ] CI parity/format/lint gates
+- [x] Rust workspace with zero-dependency enforcement
+- [x] Shared error/rational/time model
+- [x] byte and bit readers/writers
+- [x] capability registry
+- [x] CI parity/format/lint gates
 
 ### Phase 1 — first complete vertical slice
 
-- [ ] RIFF/WAVE probe + demux + mux
-- [ ] PCM integer/float codecs
-- [ ] `ffprobe` stream/container reporting
-- [ ] `ffmpeg -i in.wav -c copy out.wav`
-- [ ] PCM format conversion
-- [ ] timestamp and seek tests
+- [x] RIFF/WAVE probe + demux + mux
+- [x] PCM integer/float codecs
+- [x] `ffprobe` stream/container reporting
+- [x] `ffmpeg -i in.wav -c copy out.wav`
+- [x] PCM format conversion
+- [ ] extended timestamp and seek parity tests
 
 ### Phase 2 — image/video fundamentals
 
-- [ ] image2 sequence protocol/demux/mux
-- [ ] PPM/PGM/PBM
+- [x] image2 sequence protocol/demux/mux
+- [x] PPM/PGM/PBM P1-P6
 - [ ] BMP
 - [ ] TGA
 - [ ] PNG (including repository-owned DEFLATE/zlib)
 - [ ] JPEG baseline/progressive
-- [ ] pixel format model and scaler
+- [x] packed pixel format model and initial scaler (`gray8`/`rgb24`, nearest-neighbor)
 
 ### Phase 3 — foundational compressed audio
 
