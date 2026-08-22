@@ -5,6 +5,7 @@ members = [
     "crates/rm-io",
     "crates/rm-codec",
     "crates/rm-format",
+    "crates/rm-scale",
     "crates/rm-cli",
     "apps/ffmpeg",
     "apps/ffprobe",
