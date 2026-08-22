@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.98.0
+      - name: Enforce zero third-party Cargo dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          metadata="$(cargo metadata --format-version 1)"
+          if grep -Eq '"source":"(registry|git)\+' <<<"$metadata"; then
+            echo "third-party Cargo dependency detected"
+            grep -Eo '"name":"[^"]+"[^}]*"source":"[^"]+"' <<<"$metadata" || true
+            exit 1
+          fi
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Test
+        run: cargo test --workspace --all-targets
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
