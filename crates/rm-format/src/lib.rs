@@ -71,7 +71,9 @@ pub fn probe_wave(bytes: &[u8]) -> u8 {
 
 pub fn parse_wave(bytes: &[u8]) -> Result<WaveFile<'_>> {
     if bytes.len() < 12 {
-        return Err(MediaError::invalid_data("WAVE input is shorter than a RIFF header"));
+        return Err(MediaError::invalid_data(
+            "WAVE input is shorter than a RIFF header",
+        ));
     }
 
     let mut header = ByteReader::new(bytes);
@@ -91,7 +93,9 @@ pub fn parse_wave(bytes: &[u8]) -> Result<WaveFile<'_>> {
         .checked_add(8)
         .ok_or_else(|| MediaError::overflow("RIFF size overflow"))?;
     if declared_end > bytes.len() {
-        return Err(MediaError::invalid_data("RIFF size exceeds available input"));
+        return Err(MediaError::invalid_data(
+            "RIFF size exceeds available input",
+        ));
     }
 
     let mut reader = ByteReader::new(&bytes[..declared_end]);
@@ -161,7 +165,9 @@ pub fn parse_wave(bytes: &[u8]) -> Result<WaveFile<'_>> {
 
 fn parse_wave_fmt(bytes: &[u8]) -> Result<WaveAudioInfo> {
     if bytes.len() < 16 {
-        return Err(MediaError::invalid_data("WAVE fmt chunk is shorter than 16 bytes"));
+        return Err(MediaError::invalid_data(
+            "WAVE fmt chunk is shorter than 16 bytes",
+        ));
     }
 
     let mut reader = ByteReader::new(bytes);
@@ -224,13 +230,19 @@ fn parse_wave_fmt(bytes: &[u8]) -> Result<WaveAudioInfo> {
 
 fn validate_wave_audio(audio: WaveAudioInfo) -> Result<()> {
     if audio.channels == 0 {
-        return Err(MediaError::invalid_data("WAVE channel count must be non-zero"));
+        return Err(MediaError::invalid_data(
+            "WAVE channel count must be non-zero",
+        ));
     }
     if audio.sample_rate == 0 {
-        return Err(MediaError::invalid_data("WAVE sample rate must be non-zero"));
+        return Err(MediaError::invalid_data(
+            "WAVE sample rate must be non-zero",
+        ));
     }
     if audio.block_align == 0 {
-        return Err(MediaError::invalid_data("WAVE block alignment must be non-zero"));
+        return Err(MediaError::invalid_data(
+            "WAVE block alignment must be non-zero",
+        ));
     }
     if audio.bits_per_sample == 0 || audio.bits_per_sample % 8 != 0 {
         return Err(MediaError::invalid_data(
@@ -238,7 +250,9 @@ fn validate_wave_audio(audio: WaveAudioInfo) -> Result<()> {
         ));
     }
     if audio.valid_bits_per_sample == 0 || audio.valid_bits_per_sample > audio.bits_per_sample {
-        return Err(MediaError::invalid_data("invalid WAVE valid-bits-per-sample value"));
+        return Err(MediaError::invalid_data(
+            "invalid WAVE valid-bits-per-sample value",
+        ));
     }
     if pcm_bits_per_sample(audio.codec) != audio.bits_per_sample {
         return Err(MediaError::invalid_data(
@@ -274,7 +288,9 @@ pub fn mux_wave(audio: WaveAudioInfo, data: &[u8]) -> Result<Vec<u8>> {
     }
 
     let data_size = u32::try_from(data.len()).map_err(|_| {
-        MediaError::unsupported("classic RIFF/WAVE output is limited to 4 GiB; RF64 is not implemented yet")
+        MediaError::unsupported(
+            "classic RIFF/WAVE output is limited to 4 GiB; RF64 is not implemented yet",
+        )
     })?;
     let padded_data_size = data_size
         .checked_add(data_size & 1)
