@@ -178,13 +178,15 @@ fn unknown_codec_and_unsupported_output_are_rejected() {
     );
     assert!(!codec_result.status.success());
     assert!(String::from_utf8_lossy(&codec_result.stderr).contains("not implemented"));
+    assert!(!wave_output.exists());
 
     let format_result = run(
         &[&input, &mp4_output],
         &["-hide_banner", "-i", "{path}", "-c", "copy", "{path}"],
     );
     assert!(!format_result.status.success());
-    assert!(String::from_utf8_lossy(&format_result.stderr).contains("only implements WAVE output"));
+    assert!(String::from_utf8_lossy(&format_result.stderr).contains("cannot infer output format"));
+    assert!(!mp4_output.exists());
     fs::remove_dir_all(dir).unwrap();
 }
 
