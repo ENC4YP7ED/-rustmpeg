@@ -122,13 +122,13 @@ mod tests {
 
     #[test]
     fn packed_alpha_frames_validate_exact_storage() {
-        let gray_alpha = VideoFrame::from_vec(2, 1, PixelFormat::GrayAlpha8, vec![7, 8, 9, 10])
-            .unwrap();
+        let gray_alpha =
+            VideoFrame::from_vec(2, 1, PixelFormat::GrayAlpha8, vec![7, 8, 9, 10]).unwrap();
         assert_eq!(gray_alpha.linesize, 4);
         assert_eq!(gray_alpha.row(0).unwrap(), &[7, 8, 9, 10]);
 
-        let rgba = VideoFrame::from_vec(2, 1, PixelFormat::Rgba32, vec![1, 2, 3, 4, 5, 6, 7, 8])
-            .unwrap();
+        let rgba =
+            VideoFrame::from_vec(2, 1, PixelFormat::Rgba32, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
         assert_eq!(rgba.linesize, 8);
         assert_eq!(rgba.row(0).unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8]);
     }

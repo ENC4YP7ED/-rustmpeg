@@ -170,7 +170,10 @@ mod tests {
         let gray_alpha = convert_pixel_format(&frame, PixelFormat::GrayAlpha8).unwrap();
         assert_eq!(gray_alpha.data.as_slice(), &[77, 17, 149, 231]);
         let round_trip = convert_pixel_format(&gray_alpha, PixelFormat::Rgba32).unwrap();
-        assert_eq!(round_trip.data.as_slice(), &[77, 77, 77, 17, 149, 149, 149, 231]);
+        assert_eq!(
+            round_trip.data.as_slice(),
+            &[77, 77, 77, 17, 149, 149, 149, 231]
+        );
     }
 
     #[test]
@@ -182,13 +185,8 @@ mod tests {
 
     #[test]
     fn nearest_scale_preserves_rgba_pixels() {
-        let frame = VideoFrame::from_vec(
-            2,
-            1,
-            PixelFormat::Rgba32,
-            vec![1, 2, 3, 4, 5, 6, 7, 8],
-        )
-        .unwrap();
+        let frame =
+            VideoFrame::from_vec(2, 1, PixelFormat::Rgba32, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
         let scaled = scale_nearest(&frame, 4, 1).unwrap();
         assert_eq!(
             scaled.data.as_slice(),
