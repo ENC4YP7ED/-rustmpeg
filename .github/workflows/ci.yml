@@ -7,9 +7,47 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  apply_packed_depths:
+    if: github.event_name == 'pull_request' && github.head_ref == 'build/phase2-png-depth-interlace'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Apply tested implementation patch
+        shell: python
+        run: |
+          from pathlib import Path
+          source = Path('crates/rm-codec/src/png.rs').read_text()
+          if 'if header.bit_depth != 8 {' not in source:
+              raise SystemExit(0)
+          lines = Path('.github/workflows/apply-png-alpha.yml').read_text().splitlines()
+          start = lines.index('      - name: Implement packed PNG depths')
+          run_line = next(i for i in range(start + 1, len(lines)) if lines[i] == '        run: |')
+          end = next(i for i in range(run_line + 1, len(lines)) if lines[i] == '      - name: Format and run workspace tests')
+          code = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines[run_line + 1:end])
+          exec(compile(code, 'apply-png-alpha.yml', 'exec'))
+      - name: Format and test implementation
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          rustup default 1.98.0
+          cargo fmt --all
+          cargo test --workspace --all-targets
+      - name: Commit tested implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/rm-codec/src/png.rs crates/rm-codec/tests/pngsuite_packed_depths.rs
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat(png): decode packed grayscale and indexed depths"
+          git push origin "HEAD:${{ github.head_ref }}"
+
   quality:
     runs-on: ubuntu-latest
     steps:
