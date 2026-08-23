@@ -3,6 +3,7 @@
 pub mod bmp;
 pub mod jpeg;
 pub mod jpeg_decode;
+pub mod jpeg_encode;
 pub mod png;
 pub mod png_encode;
 pub mod pnm;
