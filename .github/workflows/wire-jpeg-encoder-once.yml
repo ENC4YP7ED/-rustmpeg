@@ -1,0 +1,42 @@
+name: wire-jpeg-encoder-once
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  wire:
+    if: github.event.pull_request.number == 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Install pinned Rust
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          rustup default 1.98.0
+      - name: Wire encoder and validate full workspace
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/rm-codec/src/lib.rs')
+          s=p.read_text()
+          if 'pub mod jpeg_encode;' not in s:
+              s=s.replace('pub mod jpeg_decode;\n', 'pub mod jpeg_decode;\npub mod jpeg_encode;\n', 1)
+          p.write_text(s)
+          PY
+          cargo fmt --all
+          cargo test --workspace --all-targets
+          cargo build --workspace --release
+          cargo clippy --workspace --all-targets -- -D warnings
+      - name: Commit validated encoder wiring
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/rm-codec/src/lib.rs crates/rm-codec/src/jpeg_encode.rs
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat(jpeg): wire validated baseline encoder"
+          git push origin "HEAD:${{ github.head_ref }}"
