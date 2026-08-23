@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod deflate;
+pub mod deflate_encode;
 pub mod zlib;
 
 const ADLER_MODULUS: u32 = 65_521;
