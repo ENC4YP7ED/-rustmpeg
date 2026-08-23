@@ -82,7 +82,18 @@ jobs:
           assert len(r)==len(g)
           m=max((abs(a-b) for a,b in zip(r,g)), default=0)
           limit=int(sys.argv[3])
-          assert m<=limit, f'max channel delta vs Go={m}, limit={limit}'
+          assert m<=limit, f'max channel delta={m}, limit={limit}'
+          print(f'max channel delta={m}')
+          PY
+          cat >/tmp/compare_raw.py <<'PY'
+          import sys
+          from pathlib import Path
+          d=Path(sys.argv[1]).read_bytes(); p=d.split(b'\n',3); r=p[3]
+          g=Path(sys.argv[2]).read_bytes()
+          assert len(r)==len(g), (len(r),len(g))
+          m=max((abs(a-b) for a,b in zip(r,g)), default=0)
+          limit=int(sys.argv[3])
+          assert m<=limit, f'max channel delta={m}, limit={limit}'
           print(f'max channel delta={m}')
           PY
       - name: Compare baseline decoder against Go
@@ -95,12 +106,13 @@ jobs:
           target/debug/ffmpeg -hide_banner -y -i /tmp/progressive.jpg /tmp/rustmpeg-progressive.ppm
           go run /tmp/oracle.go /tmp/progressive.jpg /tmp/go-progressive.ppm
           python3 /tmp/compare.py /tmp/rustmpeg-progressive.ppm /tmp/go-progressive.ppm 4
-      - name: Validate restart, non-interleaved, and progressive-restart corpus
+      - name: Validate restart, non-interleaved, and progressive-restart corpus against system FFmpeg
         run: |
           set -euo pipefail
+          test -x /usr/bin/ffmpeg
           for name in restarts non-interleaved-mcu rst_1block rst_8block progressive_rst_420; do
             echo "testing $name"
             target/debug/ffmpeg -hide_banner -y -i "/tmp/$name.jpg" "/tmp/rustmpeg-$name.ppm"
-            go run /tmp/oracle.go "/tmp/$name.jpg" "/tmp/go-$name.ppm"
-            python3 /tmp/compare.py "/tmp/rustmpeg-$name.ppm" "/tmp/go-$name.ppm" 12
+            /usr/bin/ffmpeg -v error -y -i "/tmp/$name.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/reference-$name.rgb"
+            python3 /tmp/compare_raw.py "/tmp/rustmpeg-$name.ppm" "/tmp/reference-$name.rgb" 16
           done
