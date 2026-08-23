@@ -53,7 +53,10 @@ fn adam7_and_non_interlaced_reference_transcode_to_identical_pgm() {
 
     run_decode(&adam7, &adam7_pgm);
     run_decode(&reference, &reference_pgm);
-    assert_eq!(fs::read(&adam7_pgm).unwrap(), fs::read(&reference_pgm).unwrap());
+    assert_eq!(
+        fs::read(&adam7_pgm).unwrap(),
+        fs::read(&reference_pgm).unwrap()
+    );
     fs::remove_dir_all(dir).unwrap();
 }
 

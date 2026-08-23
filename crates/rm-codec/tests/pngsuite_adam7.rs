@@ -36,7 +36,10 @@ fn upstream_pngsuite_adam7_matches_non_interlaced_reference() {
     let reference = include_bytes!("../testdata/pngsuite/basn0g01-reference.png");
     let actual = decode_png(interlaced).expect("upstream Adam7 fixture must decode");
     let expected = decode_png(reference).expect("upstream baseline fixture must decode");
-    assert_eq!((actual.width, actual.height), (expected.width, expected.height));
+    assert_eq!(
+        (actual.width, actual.height),
+        (expected.width, expected.height)
+    );
     assert_eq!(actual.format, expected.format);
     assert_eq!(actual.data.as_slice(), expected.data.as_slice());
 }
@@ -84,13 +87,7 @@ fn make_adam7_png(
     bit_depth: u8,
     first_filter_override: Option<u8>,
 ) -> Vec<u8> {
-    let scanlines = make_scanlines(
-        width,
-        height,
-        color_type,
-        bit_depth,
-        first_filter_override,
-    );
+    let scanlines = make_scanlines(width, height, color_type, bit_depth, first_filter_override);
     build_png(width, height, color_type, bit_depth, &scanlines)
 }
 
@@ -179,7 +176,11 @@ fn filter_row(filter: u8, raw: &[u8], previous: &[u8], bpp: usize) -> Vec<u8> {
         .map(|(index, &value)| {
             let left = if index >= bpp { raw[index - bpp] } else { 0 };
             let up = previous[index];
-            let up_left = if index >= bpp { previous[index - bpp] } else { 0 };
+            let up_left = if index >= bpp {
+                previous[index - bpp]
+            } else {
+                0
+            };
             let predictor = match filter {
                 0 => 0,
                 1 => left,
@@ -193,7 +194,12 @@ fn filter_row(filter: u8, raw: &[u8], previous: &[u8], bpp: usize) -> Vec<u8> {
         .collect()
 }
 
-fn expected_pixels(width: u32, height: u32, color_type: u8, bit_depth: u8) -> (PixelFormat, Vec<u8>) {
+fn expected_pixels(
+    width: u32,
+    height: u32,
+    color_type: u8,
+    bit_depth: u8,
+) -> (PixelFormat, Vec<u8>) {
     let format = match color_type {
         0 => PixelFormat::Gray8,
         2 | 3 => PixelFormat::Rgb24,
