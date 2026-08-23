@@ -1,0 +1,62 @@
+name: png-encoder-oracle
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go-png-oracle:
+    if: github.event.pull_request.number == 7
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+      - name: Build rustmpeg ffmpeg
+        run: cargo build -p rustmpeg-ffmpeg
+      - name: Generate reference RGB source and PNG
+        shell: python
+        run: |
+          from pathlib import Path
+          rgb = bytes([
+              255,0,0,   0,255,0,   0,0,255,
+              255,255,255,  17,34,51,  250,128,7,
+          ])
+          Path('/tmp/source.ppm').write_bytes(b'P6\n3 2\n255\n' + rgb)
+      - name: Encode with rustmpeg
+        run: target/debug/ffmpeg -hide_banner -y -i /tmp/source.ppm /tmp/output.png
+      - name: Decode with Go standard library and verify exact pixels
+        run: |
+          cat >/tmp/check_png.go <<'EOF'
+          package main
+          import (
+            "fmt"
+            "image/png"
+            "os"
+          )
+          func main() {
+            f, err := os.Open("/tmp/output.png")
+            if err != nil { panic(err) }
+            defer f.Close()
+            img, err := png.Decode(f)
+            if err != nil { panic(err) }
+            b := img.Bounds()
+            if b.Dx() != 3 || b.Dy() != 2 { panic(fmt.Sprintf("wrong size %v", b)) }
+            want := [][3]uint8{{255,0,0},{0,255,0},{0,0,255},{255,255,255},{17,34,51},{250,128,7}}
+            i := 0
+            for y := b.Min.Y; y < b.Max.Y; y++ {
+              for x := b.Min.X; x < b.Max.X; x++ {
+                r,g,bl,a := img.At(x,y).RGBA()
+                got := [3]uint8{uint8(r>>8),uint8(g>>8),uint8(bl>>8)}
+                if got != want[i] || a != 0xffff { panic(fmt.Sprintf("pixel %d got %v alpha=%d want=%v", i, got, a, want[i])) }
+                i++
+              }
+            }
+          }
+          EOF
+          go run /tmp/check_png.go
