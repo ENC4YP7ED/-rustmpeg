@@ -19,7 +19,8 @@ fn wave_tag(codec: CodecId) -> u16 {
         | CodecId::Ppm
         | CodecId::Bmp
         | CodecId::Targa
-        | CodecId::Png => {
+        | CodecId::Png
+        | CodecId::Jpeg => {
             unreachable!("WAVE matrix received image codec")
         }
     }

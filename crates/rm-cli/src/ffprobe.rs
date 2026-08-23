@@ -463,7 +463,8 @@ fn sample_format_name(codec: CodecId) -> &'static str {
         | CodecId::Ppm
         | CodecId::Bmp
         | CodecId::Targa
-        | CodecId::Png => "unknown",
+        | CodecId::Png
+        | CodecId::Jpeg => "unknown",
     }
 }
 

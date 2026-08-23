@@ -2,6 +2,9 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 use rm_codec::bmp::{decode_bmp, encode_bmp, probe_bmp};
+use rm_codec::jpeg::{parse_jpeg, probe_jpeg};
+use rm_codec::jpeg_decode::decode_jpeg;
+use rm_codec::jpeg_encode::encode_jpeg;
 use rm_codec::png::{decode_png, encode_png, probe_png};
 use rm_codec::pnm::{PnmImage, PnmKind, decode_pnm, encode_pnm, probe_pnm};
 use rm_codec::tga::{decode_tga, encode_tga, probe_tga};
@@ -22,6 +25,7 @@ pub fn probe_image(bytes: &[u8]) -> u8 {
         .max(probe_bmp(bytes))
         .max(probe_tga(bytes))
         .max(probe_png(bytes))
+        .max(probe_jpeg(bytes))
 }
 
 pub fn decode_image(bytes: &[u8]) -> Result<DecodedImage> {
@@ -29,14 +33,26 @@ pub fn decode_image(bytes: &[u8]) -> Result<DecodedImage> {
     let bmp_score = probe_bmp(bytes);
     let tga_score = probe_tga(bytes);
     let png_score = probe_png(bytes);
-    let best = pnm_score.max(bmp_score).max(tga_score).max(png_score);
+    let jpeg_score = probe_jpeg(bytes);
+    let best = pnm_score
+        .max(bmp_score)
+        .max(tga_score)
+        .max(png_score)
+        .max(jpeg_score);
 
     if best == 0 {
         return Err(MediaError::invalid_data(
-            "input is not a supported image (PBM/PGM/PPM/BMP/TGA/PNG)",
+            "input is not a supported image (PBM/PGM/PPM/BMP/TGA/PNG/JPEG)",
         ));
     }
 
+    if jpeg_score == best {
+        let _ = parse_jpeg(bytes)?;
+        return Ok(DecodedImage {
+            codec: CodecId::Jpeg,
+            frame: decode_jpeg(bytes)?,
+        });
+    }
     if png_score == best {
         return Ok(DecodedImage {
             codec: CodecId::Png,
@@ -77,6 +93,7 @@ pub fn encode_image(codec: CodecId, frame: &VideoFrame) -> Result<Vec<u8>> {
         }
         CodecId::Targa => encode_tga(frame),
         CodecId::Png => encode_png(frame),
+        CodecId::Jpeg => encode_jpeg(frame),
         CodecId::PcmU8
         | CodecId::PcmS16Le
         | CodecId::PcmS24Le
@@ -95,6 +112,13 @@ pub fn prepare_frame(
 ) -> Result<VideoFrame> {
     let target_format = match codec {
         CodecId::Targa | CodecId::Png => frame.format,
+        CodecId::Jpeg => {
+            if frame.format == PixelFormat::Gray8 {
+                PixelFormat::Gray8
+            } else {
+                PixelFormat::Rgb24
+            }
+        }
         _ => pixel_format_for_codec(codec)?,
     };
     let converted = convert_pixel_format(frame, target_format)?;
@@ -115,6 +139,7 @@ pub fn is_image_codec(codec: CodecId) -> bool {
                 | CodecId::Bmp
                 | CodecId::Targa
                 | CodecId::Png
+                | CodecId::Jpeg
         )
 }
 
@@ -133,6 +158,11 @@ pub fn codec_for_path(path: &Path) -> Option<CodecId> {
         Some(CodecId::Targa)
     } else if extension.eq_ignore_ascii_case("png") {
         Some(CodecId::Png)
+    } else if extension.eq_ignore_ascii_case("jpg")
+        || extension.eq_ignore_ascii_case("jpeg")
+        || extension.eq_ignore_ascii_case("jpe")
+    {
+        Some(CodecId::Jpeg)
     } else {
         None
     }
@@ -156,6 +186,7 @@ pub const fn pnm_kind_for_codec(codec: CodecId) -> Option<PnmKind> {
         CodecId::Bmp
         | CodecId::Targa
         | CodecId::Png
+        | CodecId::Jpeg
         | CodecId::PcmU8
         | CodecId::PcmS16Le
         | CodecId::PcmS24Le
@@ -168,7 +199,9 @@ pub const fn pnm_kind_for_codec(codec: CodecId) -> Option<PnmKind> {
 pub fn pixel_format_for_codec(codec: CodecId) -> Result<PixelFormat> {
     match codec {
         CodecId::Pbm | CodecId::Pgm => Ok(PixelFormat::Gray8),
-        CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png => Ok(PixelFormat::Rgb24),
+        CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png | CodecId::Jpeg => {
+            Ok(PixelFormat::Rgb24)
+        }
         CodecId::PcmU8
         | CodecId::PcmS16Le
         | CodecId::PcmS24Le
