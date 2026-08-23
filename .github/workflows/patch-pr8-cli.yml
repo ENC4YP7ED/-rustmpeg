@@ -1,0 +1,70 @@
+name: patch-pr8-cli
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.number == 8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Wire PNG options into ffmpeg CLI
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('crates/rm-cli/src/ffmpeg.rs')
+          text = p.read_text()
+          old = '''use rm_codec::{\n    CodecId, MediaType, convert_pcm, descriptor, find_by_name, pcm_bits_per_sample,\n    pcm_bytes_per_sample,\n};'''
+          new = '''use rm_codec::png::{PngEncodeOptions, PngPrediction, encode_png_with_options};\nuse rm_codec::{\n    CodecId, MediaType, convert_pcm, descriptor, find_by_name, pcm_bits_per_sample,\n    pcm_bytes_per_sample,\n};'''
+          if old not in text: raise SystemExit('import anchor missing')
+          text = text.replace(old, new, 1)
+
+          old = '''    output_framerate: Option<Rational>,\n}'''
+          new = '''    output_framerate: Option<Rational>,\n    png_prediction: PngPrediction,\n    png_compression_level: u8,\n    png_dpi: Option<u32>,\n    png_dpm: Option<u32>,\n    png_interlaced: bool,\n}'''
+          if old not in text: raise SystemExit('Options field anchor missing')
+          text = text.replace(old, new, 1)
+
+          old = '''            output_framerate: None,\n        }'''
+          new = '''            output_framerate: None,\n            png_prediction: PngPrediction::Paeth,\n            png_compression_level: 6,\n            png_dpi: None,\n            png_dpm: None,\n            png_interlaced: false,\n        }'''
+          if old not in text: raise SystemExit('Options default anchor missing')
+          text = text.replace(old, new, 1)
+
+          text = text.replace('(codec, encode_image(codec, &prepared)?)', '(codec, encode_output_image(codec, &prepared, options)?)')
+
+          parse_anchor = '''        } else if is(arg, "-y") {\n            options.overwrite = true;'''
+          parse_insert = '''        } else if is(arg, "-pred") {\n            index += 1;\n            let value = args.get(index).ok_or_else(|| MediaError::invalid_argument("missing value after -pred"))?;\n            options.png_prediction = PngPrediction::parse(&value.to_string_lossy())?;\n        } else if is(arg, "-compression_level") {\n            index += 1;\n            let value = parse_usize(args.get(index).ok_or_else(|| MediaError::invalid_argument("missing value after -compression_level"))?, "compression_level")?;\n            options.png_compression_level = u8::try_from(value).map_err(|_| MediaError::invalid_argument("compression_level must be in 0..=9"))?;\n            if options.png_compression_level > 9 {\n                return Err(MediaError::invalid_argument("compression_level must be in 0..=9"));\n            }\n        } else if is(arg, "-dpi") || is(arg, "-dpm") {\n            let dpi = is(arg, "-dpi");\n            index += 1;\n            let value = parse_usize(args.get(index).ok_or_else(|| MediaError::invalid_argument("missing PNG density value"))?, if dpi { "dpi" } else { "dpm" })?;\n            let value = u32::try_from(value).map_err(|_| MediaError::invalid_argument("PNG density exceeds u32"))?;\n            if value > 0x1_0000 {\n                return Err(MediaError::invalid_argument("PNG dpi/dpm must be in 0..=65536"));\n            }\n            if dpi { options.png_dpi = Some(value); } else { options.png_dpm = Some(value); }\n        } else if is(arg, "-flags") {\n            index += 1;\n            let flags = args.get(index).ok_or_else(|| MediaError::invalid_argument("missing value after -flags"))?.to_string_lossy();\n            for token in flags.split(|c| c == '+' || c == '-') {\n                if token.is_empty() { continue; }\n                if token.eq_ignore_ascii_case("ildct") {\n                    options.png_interlaced = !flags.contains("-ildct");\n                } else if !token.eq_ignore_ascii_case("bitexact") {\n                    return Err(MediaError::unsupported(format!("codec flag '{token}' is not implemented yet")));\n                }\n            }\n        } else if is(arg, "-y") {\n            options.overwrite = true;'''
+          if parse_anchor not in text: raise SystemExit('parse anchor missing')
+          text = text.replace(parse_anchor, parse_insert, 1)
+
+          validate_anchor = '''    if options.overwrite && options.never_overwrite {\n        return Err(MediaError::invalid_argument(\n            "-y and -n cannot be used together",\n        ));\n    }\n    Ok(options)'''
+          validate_new = '''    if options.overwrite && options.never_overwrite {\n        return Err(MediaError::invalid_argument(\n            "-y and -n cannot be used together",\n        ));\n    }\n    PngEncodeOptions {\n        prediction: options.png_prediction,\n        compression_level: options.png_compression_level,\n        dpi: options.png_dpi,\n        dpm: options.png_dpm,\n        interlaced: options.png_interlaced,\n        sample_aspect_ratio: (0, 1),\n    }.validate()?;\n    Ok(options)'''
+          if validate_anchor not in text: raise SystemExit('validation anchor missing')
+          text = text.replace(validate_anchor, validate_new, 1)
+
+          helper_anchor = '''fn check_output(output: &Path, options: &Options) -> Result<()> {'''
+          helper = '''fn encode_output_image(codec: CodecId, frame: &rm_core::video::VideoFrame, options: &Options) -> Result<Vec<u8>> {\n    if codec == CodecId::Png {\n        encode_png_with_options(frame, PngEncodeOptions {\n            prediction: options.png_prediction,\n            compression_level: options.png_compression_level,\n            dpi: options.png_dpi,\n            dpm: options.png_dpm,\n            interlaced: options.png_interlaced,\n            sample_aspect_ratio: (0, 1),\n        })\n    } else {\n        encode_image(codec, frame)\n    }\n}\n\nfn check_output(output: &Path, options: &Options) -> Result<()> {'''
+          if helper_anchor not in text: raise SystemExit('helper anchor missing')
+          text = text.replace(helper_anchor, helper, 1)
+          p.write_text(text)
+      - name: Format and test full workspace
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          rustup default 1.98.0
+          cargo fmt --all
+          cargo test --workspace --all-targets
+      - name: Commit tested CLI integration
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/rm-cli/src/ffmpeg.rs
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat(ffmpeg): add PNG private encoder options"
+          git push origin "HEAD:${{ github.head_ref }}"
