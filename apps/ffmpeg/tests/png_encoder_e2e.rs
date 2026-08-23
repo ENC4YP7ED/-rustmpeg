@@ -78,7 +78,11 @@ fn flat_image_uses_compressed_zlib_and_is_materially_smaller_than_raw_pixels() {
 
     run(&source, &png);
     let encoded = fs::read(&png).unwrap();
-    assert!(encoded.len() < pixels.len() / 8, "encoded size was {}", encoded.len());
+    assert!(
+        encoded.len() < pixels.len() / 8,
+        "encoded size was {}",
+        encoded.len()
+    );
 
     let idat = find_first_chunk(&encoded, b"IDAT").expect("PNG must contain IDAT");
     assert!(idat.len() >= 2);
@@ -89,7 +93,10 @@ fn flat_image_uses_compressed_zlib_and_is_materially_smaller_than_raw_pixels() {
 fn find_first_chunk<'a>(png: &'a [u8], wanted: &[u8; 4]) -> Option<&'a [u8]> {
     let mut offset = 8_usize;
     while offset.checked_add(12)? <= png.len() {
-        let length = usize::try_from(u32::from_be_bytes(png.get(offset..offset + 4)?.try_into().ok()?)).ok()?;
+        let length = usize::try_from(u32::from_be_bytes(
+            png.get(offset..offset + 4)?.try_into().ok()?,
+        ))
+        .ok()?;
         let kind: &[u8; 4] = png.get(offset + 4..offset + 8)?.try_into().ok()?;
         let start = offset + 8;
         let end = start.checked_add(length)?;
