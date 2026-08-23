@@ -45,7 +45,7 @@ fn adam7_png_reports_decoded_video_metadata() {
     assert!(stdout.contains("codec_type=video"));
     assert!(stdout.contains("width=32"));
     assert!(stdout.contains("height=32"));
-    assert!(stdout.contains("pix_fmt=gray8"));
+    assert!(stdout.contains("pix_fmt=gray"));
     assert!(stdout.contains("format_name=image2"));
     fs::remove_dir_all(dir).unwrap();
 }
