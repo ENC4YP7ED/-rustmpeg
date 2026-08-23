@@ -81,9 +81,9 @@ pub fn parse_jpeg(bytes: &[u8]) -> Result<JpegProbe> {
             }
             DQT => {
                 let segment = segment(bytes, &mut pos)?;
-                qtables = qtables
-                    .checked_add(count_dqt(segment)?)
-                    .ok_or_else(|| MediaError::overflow("JPEG quantization table count overflow"))?;
+                qtables = qtables.checked_add(count_dqt(segment)?).ok_or_else(|| {
+                    MediaError::overflow("JPEG quantization table count overflow")
+                })?;
             }
             DHT => {
                 let segment = segment(bytes, &mut pos)?;
@@ -121,7 +121,9 @@ pub fn parse_jpeg(bytes: &[u8]) -> Result<JpegProbe> {
         return Err(MediaError::eof("JPEG stream has no EOI marker"));
     }
     if pos != bytes.len() {
-        return Err(MediaError::invalid_data("bytes found after JPEG EOI marker"));
+        return Err(MediaError::invalid_data(
+            "bytes found after JPEG EOI marker",
+        ));
     }
     let info = frame.ok_or_else(|| MediaError::invalid_data("JPEG stream has no supported SOF"))?;
     if scans == 0 {
@@ -158,11 +160,17 @@ fn next_marker(bytes: &[u8], pos: &mut usize) -> Result<u8> {
 
 fn segment<'a>(bytes: &'a [u8], pos: &mut usize) -> Result<&'a [u8]> {
     let length_bytes = bytes
-        .get(*pos..pos.checked_add(2).ok_or_else(|| MediaError::overflow("JPEG range overflow"))?)
+        .get(
+            *pos..pos
+                .checked_add(2)
+                .ok_or_else(|| MediaError::overflow("JPEG range overflow"))?,
+        )
         .ok_or_else(|| MediaError::eof("truncated JPEG segment length"))?;
     let length = usize::from(u16::from_be_bytes([length_bytes[0], length_bytes[1]]));
     if length < 2 {
-        return Err(MediaError::invalid_data("JPEG segment length is smaller than 2"));
+        return Err(MediaError::invalid_data(
+            "JPEG segment length is smaller than 2",
+        ));
     }
     let payload_start = *pos + 2;
     let payload_end = (*pos)
@@ -189,13 +197,17 @@ fn parse_frame(marker: u8, data: &[u8]) -> Result<JpegInfo> {
         )));
     }
     if width == 0 || height == 0 || components == 0 {
-        return Err(MediaError::invalid_data("JPEG frame dimensions/components must be non-zero"));
+        return Err(MediaError::invalid_data(
+            "JPEG frame dimensions/components must be non-zero",
+        ));
     }
     let expected = 6usize
         .checked_add(usize::from(components) * 3)
         .ok_or_else(|| MediaError::overflow("JPEG component table size overflow"))?;
     if data.len() != expected {
-        return Err(MediaError::invalid_data("JPEG frame component table length mismatch"));
+        return Err(MediaError::invalid_data(
+            "JPEG frame component table length mismatch",
+        ));
     }
     for component in data[6..].chunks_exact(3) {
         let sampling = component[1];
@@ -205,7 +217,9 @@ fn parse_frame(marker: u8, data: &[u8]) -> Result<JpegInfo> {
             return Err(MediaError::invalid_data("invalid JPEG sampling factor"));
         }
         if component[2] > 3 {
-            return Err(MediaError::invalid_data("JPEG quantization table id exceeds 3"));
+            return Err(MediaError::invalid_data(
+                "JPEG quantization table id exceeds 3",
+            ));
         }
     }
     Ok(JpegInfo {
@@ -255,7 +269,9 @@ fn count_dht(data: &[u8]) -> Result<u8> {
             .ok_or_else(|| MediaError::eof("truncated JPEG Huffman table"))?;
         pos += 1;
         if spec >> 4 > 1 || spec & 0x0f > 3 {
-            return Err(MediaError::invalid_data("invalid JPEG Huffman table specifier"));
+            return Err(MediaError::invalid_data(
+                "invalid JPEG Huffman table specifier",
+            ));
         }
         let counts = data
             .get(pos..pos + 16)
@@ -266,7 +282,9 @@ fn count_dht(data: &[u8]) -> Result<u8> {
                 .ok_or_else(|| MediaError::overflow("JPEG Huffman symbol count overflow"))
         })?;
         if symbols == 0 || symbols > 256 {
-            return Err(MediaError::invalid_data("invalid JPEG Huffman symbol count"));
+            return Err(MediaError::invalid_data(
+                "invalid JPEG Huffman symbol count",
+            ));
         }
         pos = pos
             .checked_add(symbols)
@@ -282,7 +300,11 @@ fn count_dht(data: &[u8]) -> Result<u8> {
 }
 
 fn validate_scan_header(data: &[u8]) -> Result<()> {
-    let components = usize::from(*data.first().ok_or_else(|| MediaError::eof("empty JPEG SOS"))?);
+    let components = usize::from(
+        *data
+            .first()
+            .ok_or_else(|| MediaError::eof("empty JPEG SOS"))?,
+    );
     if components == 0 || components > 4 {
         return Err(MediaError::invalid_data("invalid JPEG SOS component count"));
     }
@@ -350,7 +372,10 @@ mod tests {
 
     #[test]
     fn parses_baseline_and_progressive_frame_metadata() {
-        for (marker, coding) in [(SOF0, JpegCoding::Baseline), (SOF2, JpegCoding::Progressive)] {
+        for (marker, coding) in [
+            (SOF0, JpegCoding::Baseline),
+            (SOF2, JpegCoding::Progressive),
+        ] {
             let parsed = parse_jpeg(&minimal(marker)).unwrap();
             assert_eq!(parsed.info.width, 8);
             assert_eq!(parsed.info.height, 8);

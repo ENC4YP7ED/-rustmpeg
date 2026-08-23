@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod bmp;
+pub mod jpeg;
 pub mod png;
 pub mod png_encode;
 pub mod pnm;
