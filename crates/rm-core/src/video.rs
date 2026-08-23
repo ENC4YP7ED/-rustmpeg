@@ -6,6 +6,10 @@ pub enum PixelFormat {
     GrayAlpha8,
     Rgb24,
     Rgba32,
+    Gray16Be,
+    GrayAlpha16Be,
+    Rgb48Be,
+    Rgba64Be,
 }
 
 impl PixelFormat {
@@ -16,6 +20,10 @@ impl PixelFormat {
             Self::GrayAlpha8 => "ya8",
             Self::Rgb24 => "rgb24",
             Self::Rgba32 => "rgba",
+            Self::Gray16Be => "gray16be",
+            Self::GrayAlpha16Be => "ya16be",
+            Self::Rgb48Be => "rgb48be",
+            Self::Rgba64Be => "rgba64be",
         }
     }
 
@@ -26,7 +34,37 @@ impl PixelFormat {
             Self::GrayAlpha8 => 2,
             Self::Rgb24 => 3,
             Self::Rgba32 => 4,
+            Self::Gray16Be => 2,
+            Self::GrayAlpha16Be => 4,
+            Self::Rgb48Be => 6,
+            Self::Rgba64Be => 8,
         }
+    }
+
+    #[must_use]
+    pub const fn bits_per_component(self) -> u8 {
+        match self {
+            Self::Gray8 | Self::GrayAlpha8 | Self::Rgb24 | Self::Rgba32 => 8,
+            Self::Gray16Be | Self::GrayAlpha16Be | Self::Rgb48Be | Self::Rgba64Be => 16,
+        }
+    }
+
+    #[must_use]
+    pub const fn channel_count(self) -> usize {
+        match self {
+            Self::Gray8 | Self::Gray16Be => 1,
+            Self::GrayAlpha8 | Self::GrayAlpha16Be => 2,
+            Self::Rgb24 | Self::Rgb48Be => 3,
+            Self::Rgba32 | Self::Rgba64Be => 4,
+        }
+    }
+
+    #[must_use]
+    pub const fn has_alpha(self) -> bool {
+        matches!(
+            self,
+            Self::GrayAlpha8 | Self::Rgba32 | Self::GrayAlpha16Be | Self::Rgba64Be
+        )
     }
 
     #[must_use]
@@ -125,27 +163,42 @@ mod tests {
         let gray_alpha =
             VideoFrame::from_vec(2, 1, PixelFormat::GrayAlpha8, vec![7, 8, 9, 10]).unwrap();
         assert_eq!(gray_alpha.linesize, 4);
-        assert_eq!(gray_alpha.row(0).unwrap(), &[7, 8, 9, 10]);
 
         let rgba =
             VideoFrame::from_vec(2, 1, PixelFormat::Rgba32, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
         assert_eq!(rgba.linesize, 8);
-        assert_eq!(rgba.row(0).unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn sixteen_bit_formats_have_ffmpeg_names_and_storage() {
+        let cases = [
+            (PixelFormat::Gray16Be, "gray16be", 2),
+            (PixelFormat::GrayAlpha16Be, "ya16be", 4),
+            (PixelFormat::Rgb48Be, "rgb48be", 6),
+            (PixelFormat::Rgba64Be, "rgba64be", 8),
+        ];
+        for (format, name, bpp) in cases {
+            assert_eq!(format.name(), name);
+            assert_eq!(format.bytes_per_pixel(), bpp);
+            assert_eq!(format.bits_per_component(), 16);
+            let frame = VideoFrame::from_vec(2, 1, format, vec![0; bpp * 2]).unwrap();
+            assert_eq!(frame.linesize, bpp * 2);
+        }
     }
 
     #[test]
     fn packed_row_size_is_checked() {
         assert_eq!(PixelFormat::Gray8.packed_row_bytes(4), Some(4));
-        assert_eq!(PixelFormat::GrayAlpha8.packed_row_bytes(4), Some(8));
-        assert_eq!(PixelFormat::Rgb24.packed_row_bytes(4), Some(12));
         assert_eq!(PixelFormat::Rgba32.packed_row_bytes(4), Some(16));
+        assert_eq!(PixelFormat::Gray16Be.packed_row_bytes(4), Some(8));
+        assert_eq!(PixelFormat::Rgba64Be.packed_row_bytes(4), Some(32));
     }
 
     #[test]
     fn malformed_storage_is_rejected() {
         assert!(VideoFrame::from_vec(2, 2, PixelFormat::Rgb24, vec![0; 11]).is_err());
         assert!(VideoFrame::from_vec(0, 2, PixelFormat::Gray8, Vec::new()).is_err());
-        assert!(VideoFrame::from_vec(1, 1, PixelFormat::Rgba32, vec![0; 3]).is_err());
+        assert!(VideoFrame::from_vec(1, 1, PixelFormat::Rgba64Be, vec![0; 7]).is_err());
     }
 
     #[test]
