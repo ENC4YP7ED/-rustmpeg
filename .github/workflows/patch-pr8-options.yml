@@ -1,0 +1,51 @@
+name: patch-pr8-options
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.number == 8
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Wire PNG option encoder modules
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('crates/rm-codec/src/lib.rs')
+          text = p.read_text()
+          anchor = 'pub mod png_encode;\n'
+          addition = 'pub mod png_ffmpeg_encode;\npub mod png_options;\n'
+          if 'pub mod png_ffmpeg_encode;' not in text:
+              if anchor not in text: raise SystemExit('codec module anchor missing')
+              text = text.replace(anchor, anchor + addition, 1)
+          p.write_text(text)
+
+          p = Path('crates/rm-codec/src/png.rs')
+          text = p.read_text()
+          old = 'pub use crate::png_encode::encode_png;'
+          new = 'pub use crate::png_ffmpeg_encode::{encode_png, encode_png_with_options};\npub use crate::png_options::{PngEncodeOptions, PngPrediction};'
+          if old not in text: raise SystemExit('PNG encoder export anchor missing')
+          p.write_text(text.replace(old, new, 1))
+      - name: Format and test full workspace
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          rustup default 1.98.0
+          cargo fmt --all
+          cargo test --workspace --all-targets
+      - name: Commit tested option integration
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/rm-codec/src crates/rm-compress/src
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "feat(png): enable FFmpeg-compatible encoder options"
+          git push origin "HEAD:${{ github.head_ref }}"
