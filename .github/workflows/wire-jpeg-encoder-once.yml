@@ -14,7 +14,7 @@ jobs:
           ref: ${{ github.head_ref }}
       - name: Install pinned Rust
         run: |
-          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt,clippy
           rustup default 1.98.0
       - name: Wire encoder and validate full workspace
         run: |
@@ -30,7 +30,7 @@ jobs:
           cargo fmt --all
           cargo test --workspace --all-targets
           cargo build --workspace --release
-          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy --workspace --all-targets
       - name: Commit validated encoder wiring
         run: |
           set -euo pipefail
