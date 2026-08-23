@@ -47,6 +47,10 @@ jobs:
           s=s.replace('        | CodecId::Png\n        | CodecId::PcmU8', '        | CodecId::Png\n        | CodecId::Jpeg\n        | CodecId::PcmU8',1)
           s=s.replace('CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png => Ok(PixelFormat::Rgb24),', 'CodecId::Ppm | CodecId::Bmp | CodecId::Targa | CodecId::Png | CodecId::Jpeg => Ok(PixelFormat::Rgb24),',1)
           p.write_text(s)
+
+          p=Path('crates/rm-cli/src/ffprobe.rs'); s=p.read_text()
+          s=s.replace('        | CodecId::Png => "unknown",', '        | CodecId::Png\n        | CodecId::Jpeg => "unknown",',1)
+          p.write_text(s)
           PY
           cargo fmt --all
           cargo test --workspace --all-targets
@@ -56,7 +60,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/rm-codec/src/lib.rs crates/rm-cli/src/image.rs
+          git add crates/rm-codec/src/lib.rs crates/rm-cli/src/image.rs crates/rm-cli/src/ffprobe.rs
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "feat(jpeg): expose baseline codec through image pipeline"
           git push origin "HEAD:${{ github.head_ref }}"
