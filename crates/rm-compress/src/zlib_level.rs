@@ -10,13 +10,17 @@ use crate::{adler32, deflate_level, zlib};
 /// Returns an error for an invalid level or compression/size failure.
 pub fn compress_with_level(bytes: &[u8], level: u8) -> Result<Vec<u8>> {
     if level > 9 {
-        return Err(MediaError::invalid_argument("zlib compression level must be in 0..=9"));
+        return Err(MediaError::invalid_argument(
+            "zlib compression level must be in 0..=9",
+        ));
     }
     if level == 0 {
         return zlib::compress_stored(bytes);
     }
     let deflated = deflate_level::compress_fixed_level(bytes, level)?;
-    let capacity = deflated.len().checked_add(6)
+    let capacity = deflated
+        .len()
+        .checked_add(6)
         .ok_or_else(|| MediaError::overflow("zlib output size overflow"))?;
     let mut output = Vec::with_capacity(capacity);
 
@@ -49,7 +53,10 @@ mod tests {
         for level in 0..=9 {
             let encoded = compress_with_level(&source, level).unwrap();
             assert_eq!(u16::from_be_bytes([encoded[0], encoded[1]]) % 31, 0);
-            assert_eq!(crate::zlib::decompress(&encoded, source.len()).unwrap(), source);
+            assert_eq!(
+                crate::zlib::decompress(&encoded, source.len()).unwrap(),
+                source
+            );
         }
     }
 

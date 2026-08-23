@@ -30,7 +30,10 @@ impl PngPrediction {
             Ok(Self::Sub)
         } else if value.eq_ignore_ascii_case("up") || value == "2" {
             Ok(Self::Up)
-        } else if value.eq_ignore_ascii_case("avg") || value.eq_ignore_ascii_case("average") || value == "3" {
+        } else if value.eq_ignore_ascii_case("avg")
+            || value.eq_ignore_ascii_case("average")
+            || value == "3"
+        {
             Ok(Self::Average)
         } else if value.eq_ignore_ascii_case("paeth") || value == "4" {
             Ok(Self::Paeth)

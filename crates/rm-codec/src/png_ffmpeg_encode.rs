@@ -72,17 +72,27 @@ fn write_phys(output: &mut Vec<u8>, options: PngEncodeOptions) -> Result<()> {
 }
 
 fn encode_regular_scanlines(frame: &VideoFrame, prediction: PngPrediction) -> Result<Vec<u8>> {
-    let stride = frame.format.packed_row_bytes(frame.width)
+    let stride = frame
+        .format
+        .packed_row_bytes(frame.width)
         .ok_or_else(|| MediaError::overflow("PNG row stride overflow"))?;
     let height = usize::try_from(frame.height)
         .map_err(|_| MediaError::overflow("PNG height exceeds usize"))?;
-    let capacity = stride.checked_add(1).and_then(|row| row.checked_mul(height))
+    let capacity = stride
+        .checked_add(1)
+        .and_then(|row| row.checked_mul(height))
         .ok_or_else(|| MediaError::overflow("PNG scanline size overflow"))?;
     let mut output = Vec::with_capacity(capacity);
     let mut previous = vec![0_u8; stride];
     for y in 0..frame.height {
         let raw = frame.row(y)?;
-        append_filtered(&mut output, raw, &previous, frame.format.bytes_per_pixel(), prediction);
+        append_filtered(
+            &mut output,
+            raw,
+            &previous,
+            frame.format.bytes_per_pixel(),
+            prediction,
+        );
         previous.copy_from_slice(raw);
     }
     Ok(output)
@@ -102,20 +112,27 @@ fn encode_adam7_scanlines(frame: &VideoFrame, prediction: PngPrediction) -> Resu
         if pass_width == 0 || pass_height == 0 {
             continue;
         }
-        let row_len = pass_width.checked_mul(bpp)
+        let row_len = pass_width
+            .checked_mul(bpp)
             .ok_or_else(|| MediaError::overflow("PNG Adam7 row size overflow"))?;
         let mut previous = vec![0_u8; row_len];
         let mut row = Vec::with_capacity(row_len);
         for py in 0..pass_height {
             row.clear();
             let y = y0 + py * dy;
-            let source = frame.row(u32::try_from(y).map_err(|_| MediaError::overflow("PNG row index exceeds u32"))?)?;
+            let source = frame.row(
+                u32::try_from(y).map_err(|_| MediaError::overflow("PNG row index exceeds u32"))?,
+            )?;
             for px in 0..pass_width {
                 let x = x0 + px * dx;
-                let start = x.checked_mul(bpp)
+                let start = x
+                    .checked_mul(bpp)
                     .ok_or_else(|| MediaError::overflow("PNG pixel offset overflow"))?;
-                row.extend_from_slice(source.get(start..start + bpp)
-                    .ok_or_else(|| MediaError::invalid_data("PNG frame row is truncated"))?);
+                row.extend_from_slice(
+                    source
+                        .get(start..start + bpp)
+                        .ok_or_else(|| MediaError::invalid_data("PNG frame row is truncated"))?,
+                );
             }
             append_filtered(&mut output, &row, &previous, bpp, prediction);
             previous.copy_from_slice(&row);
@@ -124,7 +141,13 @@ fn encode_adam7_scanlines(frame: &VideoFrame, prediction: PngPrediction) -> Resu
     Ok(output)
 }
 
-fn append_filtered(output: &mut Vec<u8>, raw: &[u8], previous: &[u8], bpp: usize, prediction: PngPrediction) {
+fn append_filtered(
+    output: &mut Vec<u8>,
+    raw: &[u8],
+    previous: &[u8],
+    bpp: usize,
+    prediction: PngPrediction,
+) {
     let (filter, encoded) = match prediction.filter_type() {
         Some(filter) => (filter, filter_row(filter, raw, previous, bpp)),
         None => choose_mixed_filter(raw, previous, bpp),
@@ -150,27 +173,38 @@ fn choose_mixed_filter(raw: &[u8], previous: &[u8], bpp: usize) -> (u8, Vec<u8>)
 }
 
 fn filter_row(filter: u8, raw: &[u8], previous: &[u8], bpp: usize) -> Vec<u8> {
-    raw.iter().enumerate().map(|(index, &value)| {
-        let left = if index >= bpp { raw[index - bpp] } else { 0 };
-        let up = previous.get(index).copied().unwrap_or(0);
-        let up_left = if index >= bpp { previous.get(index - bpp).copied().unwrap_or(0) } else { 0 };
-        let predictor = match filter {
-            0 => 0,
-            1 => left,
-            2 => up,
-            3 => u8::try_from(u16::midpoint(u16::from(left), u16::from(up))).expect("average fits u8"),
-            4 => paeth(left, up, up_left),
-            _ => unreachable!(),
-        };
-        value.wrapping_sub(predictor)
-    }).collect()
+    raw.iter()
+        .enumerate()
+        .map(|(index, &value)| {
+            let left = if index >= bpp { raw[index - bpp] } else { 0 };
+            let up = previous.get(index).copied().unwrap_or(0);
+            let up_left = if index >= bpp {
+                previous.get(index - bpp).copied().unwrap_or(0)
+            } else {
+                0
+            };
+            let predictor = match filter {
+                0 => 0,
+                1 => left,
+                2 => up,
+                3 => u8::try_from(u16::midpoint(u16::from(left), u16::from(up)))
+                    .expect("average fits u8"),
+                4 => paeth(left, up, up_left),
+                _ => unreachable!(),
+            };
+            value.wrapping_sub(predictor)
+        })
+        .collect()
 }
 
 fn filter_score(bytes: &[u8]) -> u64 {
-    bytes.iter().map(|&byte| {
-        let value = u16::from(byte);
-        u64::from(value.min(256 - value))
-    }).sum()
+    bytes
+        .iter()
+        .map(|&byte| {
+            let value = u16::from(byte);
+            u64::from(value.min(256 - value))
+        })
+        .sum()
 }
 
 fn paeth(left: u8, up: u8, up_left: u8) -> u8 {
@@ -181,16 +215,26 @@ fn paeth(left: u8, up: u8, up_left: u8) -> u8 {
     let pa = (p - a).abs();
     let pb = (p - b).abs();
     let pc = (p - c).abs();
-    if pa <= pb && pa <= pc { left } else if pb <= pc { up } else { up_left }
+    if pa <= pb && pa <= pc {
+        left
+    } else if pb <= pc {
+        up
+    } else {
+        up_left
+    }
 }
 
 fn extent(total: usize, start: usize, step: usize) -> usize {
-    if total <= start { 0 } else { (total - start).div_ceil(step) }
+    if total <= start {
+        0
+    } else {
+        (total - start).div_ceil(step)
+    }
 }
 
 fn write_chunk(output: &mut Vec<u8>, kind: [u8; 4], data: &[u8]) -> Result<()> {
-    let length = u32::try_from(data.len())
-        .map_err(|_| MediaError::overflow("PNG chunk exceeds u32"))?;
+    let length =
+        u32::try_from(data.len()).map_err(|_| MediaError::overflow("PNG chunk exceeds u32"))?;
     output.extend_from_slice(&length.to_be_bytes());
     output.extend_from_slice(&kind);
     output.extend_from_slice(data);
@@ -209,7 +253,12 @@ mod tests {
         let mut data = Vec::new();
         for y in 0..9_u8 {
             for x in 0..11_u8 {
-                data.extend_from_slice(&[x.wrapping_mul(17), y.wrapping_mul(29), x ^ y, 255_u8.wrapping_sub(x.wrapping_mul(7))]);
+                data.extend_from_slice(&[
+                    x.wrapping_mul(17),
+                    y.wrapping_mul(29),
+                    x ^ y,
+                    255_u8.wrapping_sub(x.wrapping_mul(7)),
+                ]);
             }
         }
         VideoFrame::from_vec(11, 9, PixelFormat::Rgba32, data).unwrap()
@@ -226,8 +275,22 @@ mod tests {
     #[test]
     fn every_prediction_mode_round_trips() {
         let source = frame();
-        for prediction in [PngPrediction::None, PngPrediction::Sub, PngPrediction::Up, PngPrediction::Average, PngPrediction::Paeth, PngPrediction::Mixed] {
-            let encoded = encode_png_with_options(&source, PngEncodeOptions { prediction, ..PngEncodeOptions::default() }).unwrap();
+        for prediction in [
+            PngPrediction::None,
+            PngPrediction::Sub,
+            PngPrediction::Up,
+            PngPrediction::Average,
+            PngPrediction::Paeth,
+            PngPrediction::Mixed,
+        ] {
+            let encoded = encode_png_with_options(
+                &source,
+                PngEncodeOptions {
+                    prediction,
+                    ..PngEncodeOptions::default()
+                },
+            )
+            .unwrap();
             assert_eq!(crate::png::decode_png(&encoded).unwrap(), source);
         }
     }
@@ -235,7 +298,14 @@ mod tests {
     #[test]
     fn adam7_encode_round_trips_through_independent_decoder_path() {
         let source = frame();
-        let encoded = encode_png_with_options(&source, PngEncodeOptions { interlaced: true, ..PngEncodeOptions::default() }).unwrap();
+        let encoded = encode_png_with_options(
+            &source,
+            PngEncodeOptions {
+                interlaced: true,
+                ..PngEncodeOptions::default()
+            },
+        )
+        .unwrap();
         assert_eq!(encoded[28], 1);
         assert_eq!(crate::png::decode_png(&encoded).unwrap(), source);
     }
@@ -243,7 +313,14 @@ mod tests {
     #[test]
     fn phys_dpi_and_default_sar_follow_ffmpeg_shape() {
         let source = frame();
-        let encoded = encode_png_with_options(&source, PngEncodeOptions { dpi: Some(300), ..PngEncodeOptions::default() }).unwrap();
+        let encoded = encode_png_with_options(
+            &source,
+            PngEncodeOptions {
+                dpi: Some(300),
+                ..PngEncodeOptions::default()
+            },
+        )
+        .unwrap();
         let phys = find_chunk(&encoded, b"pHYs").unwrap();
         assert_eq!(u32::from_be_bytes(phys[0..4].try_into().unwrap()), 11_811);
         assert_eq!(u32::from_be_bytes(phys[4..8].try_into().unwrap()), 11_811);
@@ -251,20 +328,25 @@ mod tests {
 
         let default = encode_png(&source).unwrap();
         let phys = find_chunk(&default, b"pHYs").unwrap();
-        assert_eq!(&phys[..4], &[0,0,0,0]);
-        assert_eq!(&phys[4..8], &[0,0,0,1]);
+        assert_eq!(&phys[..4], &[0, 0, 0, 0]);
+        assert_eq!(&phys[4..8], &[0, 0, 0, 1]);
         assert_eq!(phys[8], 0);
     }
 
-    fn find_chunk<'a>(png: &'a [u8], wanted: &[u8;4]) -> Option<&'a [u8]> {
+    fn find_chunk<'a>(png: &'a [u8], wanted: &[u8; 4]) -> Option<&'a [u8]> {
         let mut offset = 8_usize;
         while offset + 12 <= png.len() {
-            let len = usize::try_from(u32::from_be_bytes(png.get(offset..offset+4)?.try_into().ok()?)).ok()?;
-            let kind: &[u8;4] = png.get(offset+4..offset+8)?.try_into().ok()?;
+            let len = usize::try_from(u32::from_be_bytes(
+                png.get(offset..offset + 4)?.try_into().ok()?,
+            ))
+            .ok()?;
+            let kind: &[u8; 4] = png.get(offset + 4..offset + 8)?.try_into().ok()?;
             let start = offset + 8;
             let end = start.checked_add(len)?;
             let data = png.get(start..end)?;
-            if kind == wanted { return Some(data); }
+            if kind == wanted {
+                return Some(data);
+            }
             offset = end.checked_add(4)?;
         }
         None

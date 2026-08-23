@@ -6,10 +6,21 @@ const MAX_MATCH: usize = 258;
 const HASH_SIZE: usize = 1 << 16;
 const NONE: usize = usize::MAX;
 
-const LENGTH_BASE: [usize; 29] = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
-const LENGTH_EXTRA: [u8; 29] = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
-const DISTANCE_BASE: [usize; 30] = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
-const DISTANCE_EXTRA: [u8; 30] = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+const LENGTH_BASE: [usize; 29] = [
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
+];
+const LENGTH_EXTRA: [u8; 29] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+];
+const DISTANCE_BASE: [usize; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+];
+const DISTANCE_EXTRA: [u8; 30] = [
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
+];
 
 /// Encodes one final fixed-Huffman RFC1951 block with effort-scaled hash-chain search.
 /// `level` is 1..=9; larger values examine more candidate matches.
@@ -18,7 +29,9 @@ const DISTANCE_EXTRA: [u8; 30] = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10
 /// Returns an error when `level` is outside 1..=9 or on integer overflow.
 pub fn compress_fixed_level(bytes: &[u8], level: u8) -> Result<Vec<u8>> {
     if !(1..=9).contains(&level) {
-        return Err(MediaError::invalid_argument("DEFLATE level must be in 1..=9"));
+        return Err(MediaError::invalid_argument(
+            "DEFLATE level must be in 1..=9",
+        ));
     }
     let search_limit = match level {
         1 => 1,
@@ -51,7 +64,8 @@ pub fn compress_fixed_level(bytes: &[u8], level: u8) -> Result<Vec<u8>> {
             for consumed in 0..length {
                 insert(bytes, position + consumed, &mut heads, &mut previous);
             }
-            position = position.checked_add(length)
+            position = position
+                .checked_add(length)
                 .ok_or_else(|| MediaError::overflow("DEFLATE position overflow"))?;
         } else {
             write_fixed_symbol(&mut writer, u16::from(bytes[position]));
@@ -63,7 +77,13 @@ pub fn compress_fixed_level(bytes: &[u8], level: u8) -> Result<Vec<u8>> {
     Ok(writer.finish())
 }
 
-fn find_best(bytes: &[u8], position: usize, heads: &[usize], previous: &[usize], search_limit: usize) -> Option<(usize, usize)> {
+fn find_best(
+    bytes: &[u8],
+    position: usize,
+    heads: &[usize],
+    previous: &[usize],
+    search_limit: usize,
+) -> Option<(usize, usize)> {
     let mut candidate = heads[hash3(bytes, position)];
     let mut searched = 0_usize;
     let mut best_length = 0_usize;
@@ -112,22 +132,40 @@ fn hash3(bytes: &[u8], position: usize) -> usize {
 fn write_match(writer: &mut BitWriter, length: usize, distance: usize) -> Result<()> {
     let li = range_index(length, &LENGTH_BASE, &LENGTH_EXTRA)
         .ok_or_else(|| MediaError::invalid_argument("DEFLATE match length out of range"))?;
-    write_fixed_symbol(writer, u16::try_from(257 + li).map_err(|_| MediaError::overflow("length symbol overflow"))?);
+    write_fixed_symbol(
+        writer,
+        u16::try_from(257 + li).map_err(|_| MediaError::overflow("length symbol overflow"))?,
+    );
     if LENGTH_EXTRA[li] != 0 {
-        writer.write_bits_lsb(u32::try_from(length - LENGTH_BASE[li]).map_err(|_| MediaError::overflow("length extra overflow"))?, LENGTH_EXTRA[li]);
+        writer.write_bits_lsb(
+            u32::try_from(length - LENGTH_BASE[li])
+                .map_err(|_| MediaError::overflow("length extra overflow"))?,
+            LENGTH_EXTRA[li],
+        );
     }
     let di = range_index(distance, &DISTANCE_BASE, &DISTANCE_EXTRA)
         .ok_or_else(|| MediaError::invalid_argument("DEFLATE distance out of range"))?;
-    writer.write_huffman(u16::try_from(di).map_err(|_| MediaError::overflow("distance symbol overflow"))?, 5);
+    writer.write_huffman(
+        u16::try_from(di).map_err(|_| MediaError::overflow("distance symbol overflow"))?,
+        5,
+    );
     if DISTANCE_EXTRA[di] != 0 {
-        writer.write_bits_lsb(u32::try_from(distance - DISTANCE_BASE[di]).map_err(|_| MediaError::overflow("distance extra overflow"))?, DISTANCE_EXTRA[di]);
+        writer.write_bits_lsb(
+            u32::try_from(distance - DISTANCE_BASE[di])
+                .map_err(|_| MediaError::overflow("distance extra overflow"))?,
+            DISTANCE_EXTRA[di],
+        );
     }
     Ok(())
 }
 
 fn range_index<const N: usize>(value: usize, base: &[usize; N], extra: &[u8; N]) -> Option<usize> {
     base.iter().enumerate().find_map(|(i, &start)| {
-        let count = if extra[i] == 0 { 1 } else { 1_usize << extra[i] };
+        let count = if extra[i] == 0 {
+            1
+        } else {
+            1_usize << extra[i]
+        };
         let end = start.checked_add(count - 1)?;
         (value >= start && value <= end).then_some(i)
     })
@@ -144,21 +182,37 @@ fn write_fixed_symbol(writer: &mut BitWriter, symbol: u16) {
 }
 
 #[derive(Default)]
-struct BitWriter { bytes: Vec<u8>, current: u8, used: u8 }
+struct BitWriter {
+    bytes: Vec<u8>,
+    current: u8,
+    used: u8,
+}
 impl BitWriter {
     fn write_bit(&mut self, bit: bool) {
-        if bit { self.current |= 1 << self.used; }
+        if bit {
+            self.current |= 1 << self.used;
+        }
         self.used += 1;
-        if self.used == 8 { self.bytes.push(self.current); self.current = 0; self.used = 0; }
+        if self.used == 8 {
+            self.bytes.push(self.current);
+            self.current = 0;
+            self.used = 0;
+        }
     }
     fn write_bits_lsb(&mut self, value: u32, count: u8) {
-        for bit in 0..count { self.write_bit((value >> bit) & 1 != 0); }
+        for bit in 0..count {
+            self.write_bit((value >> bit) & 1 != 0);
+        }
     }
     fn write_huffman(&mut self, code: u16, length: u8) {
-        for bit in (0..length).rev() { self.write_bit((code >> bit) & 1 != 0); }
+        for bit in (0..length).rev() {
+            self.write_bit((code >> bit) & 1 != 0);
+        }
     }
     fn finish(mut self) -> Vec<u8> {
-        if self.used != 0 { self.bytes.push(self.current); }
+        if self.used != 0 {
+            self.bytes.push(self.current);
+        }
         self.bytes
     }
 }
@@ -172,7 +226,10 @@ mod tests {
         let source = b"abcdefghabcdefghabcdefgh-0123456789-abcdefghabcdefgh".repeat(500);
         for level in 1..=9 {
             let encoded = compress_fixed_level(&source, level).unwrap();
-            assert_eq!(crate::deflate::inflate(&encoded, source.len()).unwrap(), source);
+            assert_eq!(
+                crate::deflate::inflate(&encoded, source.len()).unwrap(),
+                source
+            );
         }
     }
 
@@ -180,7 +237,9 @@ mod tests {
     fn higher_effort_never_regresses_reference_fixture_size() {
         let mut source = Vec::new();
         for i in 0..5000_u32 {
-            source.extend_from_slice(format!("row-{i:04}-common-common-common-row-{i:04}\n").as_bytes());
+            source.extend_from_slice(
+                format!("row-{i:04}-common-common-common-row-{i:04}\n").as_bytes(),
+            );
         }
         let low = compress_fixed_level(&source, 1).unwrap();
         let high = compress_fixed_level(&source, 9).unwrap();
