@@ -18,7 +18,7 @@ jobs:
           rustup default 1.98.0
       - name: Build rustmpeg ffmpeg
         run: cargo build -p rustmpeg-ffmpeg
-      - name: Validate rustmpeg encoder with Go image/jpeg
+      - name: Generate RGB source
         shell: python
         run: |
           from pathlib import Path
@@ -27,7 +27,8 @@ jobs:
             for x in range(16):
               rgb += bytes((x*12, y*12, (x+y)*6))
           Path('/tmp/source.ppm').write_bytes(b'P6\n16 16\n255\n'+rgb)
-      - run: target/debug/ffmpeg -hide_banner -y -i /tmp/source.ppm /tmp/rustmpeg.jpg
+      - name: Encode with rustmpeg
+        run: target/debug/ffmpeg -hide_banner -y -i /tmp/source.ppm /tmp/rustmpeg.jpg
       - name: Decode rustmpeg JPEG with Go and compare source pixels
         run: |
           cat >/tmp/check.go <<'EOF'
@@ -47,34 +48,51 @@ jobs:
           }
           EOF
           go run /tmp/check.go
-      - name: Fetch immutable libjpeg-turbo baseline oracle
+      - name: Fetch immutable libjpeg-turbo baseline and progressive oracles
         run: |
-          curl --fail --location --silent --show-error \
-            https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/2646fa33f8d67373c27b558b47e77b2d8d517e31/testimages/testorig.jpg \
-            --output /tmp/upstream.jpg
-      - name: Decode upstream JPEG with rustmpeg
-        run: target/debug/ffmpeg -hide_banner -y -i /tmp/upstream.jpg /tmp/rustmpeg.ppm
-      - name: Decode same upstream JPEG with Go and compare pixels
+          set -euo pipefail
+          root=https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/2646fa33f8d67373c27b558b47e77b2d8d517e31/testimages
+          curl --fail --location --silent --show-error "$root/testorig.jpg" --output /tmp/baseline.jpg
+          curl --fail --location --silent --show-error "$root/testimgint.jpg" --output /tmp/progressive.jpg
+      - name: Build Go JPEG-to-PPM oracle
         run: |
           cat >/tmp/oracle.go <<'EOF'
           package main
           import("fmt";"image/jpeg";"os")
           func main(){
-            f,e:=os.Open("/tmp/upstream.jpg");if e!=nil{panic(e)};defer f.Close()
+            if len(os.Args)!=3{panic("input output")}
+            f,e:=os.Open(os.Args[1]);if e!=nil{panic(e)};defer f.Close()
             img,e:=jpeg.Decode(f);if e!=nil{panic(e)};b:=img.Bounds()
-            o,e:=os.Create("/tmp/go.ppm");if e!=nil{panic(e)};defer o.Close()
+            o,e:=os.Create(os.Args[2]);if e!=nil{panic(e)};defer o.Close()
             fmt.Fprintf(o,"P6\n%d %d\n255\n",b.Dx(),b.Dy())
             for y:=b.Min.Y;y<b.Max.Y;y++{for x:=b.Min.X;x<b.Max.X;x++{r,g,bl,_:=img.At(x,y).RGBA();o.Write([]byte{byte(r>>8),byte(g>>8),byte(bl>>8)})}}
           }
           EOF
-          go run /tmp/oracle.go
+      - name: Compare baseline decoder against Go
+        run: |
+          target/debug/ffmpeg -hide_banner -y -i /tmp/baseline.jpg /tmp/rustmpeg-baseline.ppm
+          go run /tmp/oracle.go /tmp/baseline.jpg /tmp/go-baseline.ppm
           python3 - <<'PY'
           from pathlib import Path
-          def p(path):
-            d=Path(path).read_bytes(); parts=d.split(b'\n',3); return parts[1],parts[2],parts[3]
-          rw,rh,r=p('/tmp/rustmpeg.ppm'); gw,gh,g=p('/tmp/go.ppm')
-          assert (rw,rh)==(gw,gh), ((rw,rh),(gw,gh))
+          def pixels(path):
+            d=Path(path).read_bytes(); p=d.split(b'\n',3); return p[1],p[2],p[3]
+          rw,rh,r=pixels('/tmp/rustmpeg-baseline.ppm'); gw,gh,g=pixels('/tmp/go-baseline.ppm')
+          assert (rw,rh)==(gw,gh)
           assert len(r)==len(g)
           m=max(abs(a-b) for a,b in zip(r,g))
-          assert m<=4, f'decoder max channel delta vs Go={m}'
+          assert m<=4, f'baseline decoder max channel delta vs Go={m}'
+          PY
+      - name: Compare progressive decoder against Go
+        run: |
+          target/debug/ffmpeg -hide_banner -y -i /tmp/progressive.jpg /tmp/rustmpeg-progressive.ppm
+          go run /tmp/oracle.go /tmp/progressive.jpg /tmp/go-progressive.ppm
+          python3 - <<'PY'
+          from pathlib import Path
+          def pixels(path):
+            d=Path(path).read_bytes(); p=d.split(b'\n',3); return p[1],p[2],p[3]
+          rw,rh,r=pixels('/tmp/rustmpeg-progressive.ppm'); gw,gh,g=pixels('/tmp/go-progressive.ppm')
+          assert (rw,rh)==(gw,gh)
+          assert len(r)==len(g)
+          m=max(abs(a-b) for a,b in zip(r,g))
+          assert m<=4, f'progressive decoder max channel delta vs Go={m}'
           PY
