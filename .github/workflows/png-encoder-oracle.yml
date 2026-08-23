@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   go-png-oracle:
-    if: github.event.pull_request.number == 7
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,13 +18,13 @@ jobs:
           rustup default 1.98.0
       - name: Build rustmpeg ffmpeg
         run: cargo build -p rustmpeg-ffmpeg
-      - name: Generate reference RGB source and PNG
+      - name: Generate reference RGB source
         shell: python
         run: |
           from pathlib import Path
           rgb = bytes([
-              255,0,0,   0,255,0,   0,0,255,
-              255,255,255,  17,34,51,  250,128,7,
+              255,0,0, 0,255,0, 0,0,255,
+              255,255,255, 17,34,51, 250,128,7,
           ])
           Path('/tmp/source.ppm').write_bytes(b'P6\n3 2\n255\n' + rgb)
       - name: Encode with rustmpeg
