@@ -1,0 +1,163 @@
+name: patch-jpeg-restart-once
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.event.pull_request.number == 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - name: Install pinned Rust
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
+          rustup default 1.98.0
+      - name: Apply restart-aware entropy decoding
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/rm-codec/src/jpeg_decode.rs')
+          s=p.read_text()
+          a=s.index('fn entropy_unstuff(')
+          b=s.index('\npub fn decode_jpeg', a)
+          replacement=r'''struct EntropyData {
+    segments: Vec<Vec<u8>>,
+    restarts: Vec<u8>,
+}
+
+fn entropy_split(data: &[u8]) -> Result<EntropyData> {
+    let mut segments = vec![Vec::with_capacity(data.len())];
+    let mut restarts = Vec::new();
+    let mut i = 0usize;
+    while i < data.len() {
+        if data[i] != 0xff {
+            segments.last_mut().unwrap().push(data[i]);
+            i += 1;
+            continue;
+        }
+        let next = *data
+            .get(i + 1)
+            .ok_or_else(|| MediaError::eof("truncated JPEG entropy marker"))?;
+        match next {
+            0x00 => {
+                segments.last_mut().unwrap().push(0xff);
+                i += 2;
+            }
+            0xd0..=0xd7 => {
+                restarts.push(next);
+                segments.push(Vec::new());
+                i += 2;
+            }
+            0xff => {
+                // Fill bytes are legal before an entropy marker. Skip one prefix and
+                // let the next iteration classify the final marker byte pair.
+                i += 1;
+            }
+            _ => {
+                return Err(MediaError::invalid_data(
+                    "unexpected marker inside JPEG entropy payload",
+                ));
+            }
+        }
+    }
+    Ok(EntropyData { segments, restarts })
+}
+'''
+          s=s[:a]+replacement+s[b:]
+          s=s.replace('    let mut entropy = None::<Vec<u8>>;\n', '    let mut entropy = None::<EntropyData>;\n    let mut restart_interval = 0u16;\n',1)
+          anchor='''            0xc0 => {'''
+          dri='''            0xdd => {
+                if seg.len() != 2 {
+                    return Err(MediaError::invalid_data("JPEG DRI payload must be 2 bytes"));
+                }
+                restart_interval = u16::from_be_bytes([seg[0], seg[1]]);
+            }
+'''
+          s=s.replace(anchor,dri+anchor,1)
+          s=s.replace('entropy = Some(entropy_unstuff(&bytes[start..end])?);','entropy = Some(entropy_split(&bytes[start..end])?);',1)
+          s=s.replace('''    let entropy = entropy.ok_or_else(|| MediaError::invalid_data("JPEG missing entropy scan"))?;
+''','''    let entropy = entropy.ok_or_else(|| MediaError::invalid_data("JPEG missing entropy scan"))?;
+''',1)
+          old='''    let mut predictors = vec![0i32; components.len()];
+    let mut br = BitReader::new(&entropy);
+
+    for my in 0..mcus_y {
+        for mx in 0..mcus_x {
+'''
+          new='''    let total_mcus = mcus_x
+        .checked_mul(mcus_y)
+        .ok_or_else(|| MediaError::overflow("JPEG MCU count overflow"))?;
+    let expected_restarts = if restart_interval == 0 || total_mcus == 0 {
+        0
+    } else {
+        (total_mcus - 1) / usize::from(restart_interval)
+    };
+    if entropy.restarts.len() != expected_restarts {
+        return Err(MediaError::invalid_data(format!(
+            "JPEG restart marker count mismatch: got {}, expected {expected_restarts}",
+            entropy.restarts.len()
+        )));
+    }
+    for (index, &marker) in entropy.restarts.iter().enumerate() {
+        let expected = 0xd0 + u8::try_from(index % 8).unwrap();
+        if marker != expected {
+            return Err(MediaError::invalid_data("JPEG restart marker sequence mismatch"));
+        }
+    }
+    if entropy.segments.len() != expected_restarts + 1 {
+        return Err(MediaError::invalid_data("JPEG restart segment count mismatch"));
+    }
+
+    let mut predictors = vec![0i32; components.len()];
+    let mut segment_index = 0usize;
+    let mut br = BitReader::new(&entropy.segments[0]);
+    let mut mcu_index = 0usize;
+
+    for my in 0..mcus_y {
+        for mx in 0..mcus_x {
+            if mcu_index != 0
+                && restart_interval != 0
+                && mcu_index.is_multiple_of(usize::from(restart_interval))
+            {
+                segment_index += 1;
+                predictors.fill(0);
+                br = BitReader::new(&entropy.segments[segment_index]);
+            }
+'''
+          if old not in s: raise SystemExit('decode-loop anchor not found')
+          s=s.replace(old,new,1)
+          # increment exactly once per MCU after all component blocks
+          needle='''                }
+            }
+        }
+    }
+
+    if components.len() == 1 {'''
+          repl='''                }
+            }
+            mcu_index += 1;
+        }
+    }
+
+    if components.len() == 1 {'''
+          if needle not in s: raise SystemExit('mcu increment anchor not found')
+          s=s.replace(needle,repl,1)
+          p.write_text(s)
+          PY
+          cargo fmt --all
+          cargo test --workspace --all-targets
+          cargo build --workspace --release
+      - name: Commit validated restart handling
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/rm-codec/src/jpeg_decode.rs
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "fix(jpeg): reset predictors across validated restart intervals"
+          git push origin "HEAD:${{ github.head_ref }}"
