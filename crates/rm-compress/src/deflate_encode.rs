@@ -201,7 +201,10 @@ mod tests {
     fn empty_and_literal_only_inputs_round_trip() {
         for input in [b"".as_slice(), b"a", b"abcdefg", &[0, 1, 2, 3, 4, 5, 6, 7]] {
             let compressed = compress_fixed(input).unwrap();
-            assert_eq!(crate::deflate::inflate(&compressed, input.len()).unwrap(), input);
+            assert_eq!(
+                crate::deflate::inflate(&compressed, input.len()).unwrap(),
+                input
+            );
         }
     }
 
@@ -213,7 +216,10 @@ mod tests {
             (0..100_000_u32).map(|value| (value & 0xff) as u8).collect(),
         ] {
             let compressed = compress_fixed(&input).unwrap();
-            assert_eq!(crate::deflate::inflate(&compressed, input.len()).unwrap(), input);
+            assert_eq!(
+                crate::deflate::inflate(&compressed, input.len()).unwrap(),
+                input
+            );
         }
     }
 
@@ -226,9 +232,14 @@ mod tests {
 
     #[test]
     fn distance_window_boundary_is_respected() {
-        let mut input = (0..32_768_u32).map(|value| (value.wrapping_mul(73) & 0xff) as u8).collect::<Vec<_>>();
+        let mut input = (0..32_768_u32)
+            .map(|value| (value.wrapping_mul(73) & 0xff) as u8)
+            .collect::<Vec<_>>();
         input.extend_from_slice(&input.clone());
         let compressed = compress_fixed(&input).unwrap();
-        assert_eq!(crate::deflate::inflate(&compressed, input.len()).unwrap(), input);
+        assert_eq!(
+            crate::deflate::inflate(&compressed, input.len()).unwrap(),
+            input
+        );
     }
 }

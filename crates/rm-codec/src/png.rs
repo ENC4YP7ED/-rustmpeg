@@ -3,7 +3,8 @@ mod adam7;
 #[path = "png_baseline.rs"]
 mod baseline;
 
-pub use baseline::{encode_png, probe_png};
+pub use crate::png_encode::encode_png;
+pub use baseline::probe_png;
 
 use rm_compress::{crc32, zlib};
 use rm_core::video::{PixelFormat, VideoFrame};

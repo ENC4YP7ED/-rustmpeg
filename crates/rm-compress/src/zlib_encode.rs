@@ -38,7 +38,10 @@ mod tests {
             let encoded = compress(&input).unwrap();
             assert_eq!(u16::from_be_bytes([encoded[0], encoded[1]]) % 31, 0);
             assert_eq!(encoded[0] & 0x0f, 8);
-            assert_eq!(crate::zlib::decompress(&encoded, input.len()).unwrap(), input);
+            assert_eq!(
+                crate::zlib::decompress(&encoded, input.len()).unwrap(),
+                input
+            );
         }
     }
 

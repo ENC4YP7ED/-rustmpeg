@@ -169,7 +169,9 @@ mod tests {
                 PixelFormat::Rgba32,
                 2,
                 2,
-                vec![255, 0, 0, 0, 0, 255, 0, 85, 0, 0, 255, 170, 255, 255, 255, 255],
+                vec![
+                    255, 0, 0, 0, 0, 255, 0, 85, 0, 0, 255, 170, 255, 255, 255, 255,
+                ],
             ),
         ];
         for source in cases {
@@ -191,7 +193,6 @@ mod tests {
     fn compressed_png_is_much_smaller_than_stored_baseline_on_flat_image() {
         let source = frame(PixelFormat::Rgba32, 256, 256, vec![0x80; 256 * 256 * 4]);
         let compressed = encode_png(&source).unwrap();
-        let stored = crate::png::baseline::encode_png(&source).unwrap();
-        assert!(compressed.len() < stored.len() / 8);
+        assert!(compressed.len() < source.data.len() / 8);
     }
 }
