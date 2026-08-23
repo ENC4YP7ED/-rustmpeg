@@ -37,6 +37,39 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+  pngsuite-adam7:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+      - name: Fetch immutable PngSuite Adam7 oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pngsuite"
+          python3 - <<'PY'
+          import pathlib, urllib.request
+          commit = "8cd768dd0d0063195174d0d01cacbd5a7d1e5605"
+          cases = ["0g01","0g02","0g04","0g08","0g16","2c08","2c16","3p01","3p02","3p04","3p08","4a08","4a16","6a08","6a16"]
+          root = pathlib.Path(__import__('os').environ['RUNNER_TEMP']) / 'pngsuite'
+          for case in cases:
+              for prefix in ('basi', 'basn'):
+                  name = f'{prefix}{case}.png'
+                  url = f'https://raw.githubusercontent.com/lunapaint/pngsuite/{commit}/png/{name}'
+                  with urllib.request.urlopen(url, timeout=30) as response:
+                      data = response.read()
+                  if not data.startswith(b'\x89PNG\r\n\x1a\n'):
+                      raise SystemExit(f'{name}: upstream response is not PNG')
+                  (root / name).write_bytes(data)
+          PY
+      - name: Compare all legal Adam7 basic formats with non-interlaced oracle
+        env:
+          RUSTMPEG_PNGSUITE_DIR: ${{ runner.temp }}/pngsuite
+        run: cargo test -p rm-codec --test png_adam7_external -- --nocapture
+
   portable:
     strategy:
       fail-fast: false
