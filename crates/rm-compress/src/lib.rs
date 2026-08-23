@@ -3,6 +3,7 @@
 pub mod deflate;
 pub mod deflate_encode;
 pub mod zlib;
+pub mod zlib_encode;
 
 const ADLER_MODULUS: u32 = 65_521;
 const CRC32_POLYNOMIAL: u32 = 0xEDB8_8320;
