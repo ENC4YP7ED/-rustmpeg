@@ -1,3 +1,5 @@
+#[path = "png_adam7.rs"]
+mod adam7;
 #[path = "png_baseline.rs"]
 mod baseline;
 
@@ -20,11 +22,21 @@ struct Header16 {
 /// Decode PNG while routing already validated <=8-bit behavior to the baseline
 /// decoder and keeping 16-bit sample handling isolated.
 pub fn decode_png(bytes: &[u8]) -> Result<VideoFrame> {
-    if is_16_bit_png(bytes) {
+    if is_adam7_png(bytes) {
+        adam7::decode_png_adam7(bytes)
+    } else if is_16_bit_png(bytes) {
         decode_png_16(bytes)
     } else {
         baseline::decode_png(bytes)
     }
+}
+
+fn is_adam7_png(bytes: &[u8]) -> bool {
+    bytes.len() >= 29
+        && bytes.starts_with(&PNG_SIGNATURE)
+        && bytes.get(8..12) == Some(&13_u32.to_be_bytes())
+        && bytes.get(12..16) == Some(b"IHDR")
+        && bytes[28] == 1
 }
 
 fn is_16_bit_png(bytes: &[u8]) -> bool {

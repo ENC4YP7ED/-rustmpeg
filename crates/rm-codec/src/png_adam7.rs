@@ -113,7 +113,9 @@ fn parse(bytes: &[u8]) -> Result<Parsed<'_>> {
                     return Err(MediaError::invalid_data("PNG PLTE appeared after IDAT"));
                 }
                 if palette.is_some() {
-                    return Err(MediaError::invalid_data("PNG contains multiple PLTE chunks"));
+                    return Err(MediaError::invalid_data(
+                        "PNG contains multiple PLTE chunks",
+                    ));
                 }
                 if matches!(png.color_type, 0 | 4) {
                     return Err(MediaError::invalid_data(
@@ -154,7 +156,9 @@ fn parse(bytes: &[u8]) -> Result<Parsed<'_>> {
                     }
                     3 => {
                         let entries = palette
-                            .ok_or_else(|| MediaError::invalid_data("indexed PNG tRNS requires PLTE"))?
+                            .ok_or_else(|| {
+                                MediaError::invalid_data("indexed PNG tRNS requires PLTE")
+                            })?
                             .len()
                             / 3;
                         if data.len() > entries {
@@ -176,7 +180,9 @@ fn parse(bytes: &[u8]) -> Result<Parsed<'_>> {
                 let png = header
                     .ok_or_else(|| MediaError::invalid_data("PNG IDAT appeared before IHDR"))?;
                 if png.color_type == 3 && palette.is_none() {
-                    return Err(MediaError::invalid_data("indexed PNG requires PLTE before IDAT"));
+                    return Err(MediaError::invalid_data(
+                        "indexed PNG requires PLTE before IDAT",
+                    ));
                 }
                 if idat_ended {
                     return Err(MediaError::invalid_data(
@@ -256,7 +262,9 @@ fn parse_header(data: &[u8]) -> Result<Header> {
         )));
     }
     if data[10] != 0 {
-        return Err(MediaError::unsupported("unsupported PNG compression method"));
+        return Err(MediaError::unsupported(
+            "unsupported PNG compression method",
+        ));
     }
     if data[11] != 0 {
         return Err(MediaError::unsupported("unsupported PNG filter method"));
@@ -501,7 +509,8 @@ fn write_pixel(
             }
         }
         3 => {
-            let palette = palette.ok_or_else(|| MediaError::invalid_data("indexed PNG requires PLTE"))?;
+            let palette =
+                palette.ok_or_else(|| MediaError::invalid_data("indexed PNG requires PLTE"))?;
             let index = usize::from(samples[0]);
             let entry = index
                 .checked_mul(3)
@@ -534,12 +543,10 @@ fn write_pixel(
 
 fn scale_sample(sample: u16, bit_depth: u8) -> Result<u8> {
     match bit_depth {
-        8 => u8::try_from(sample)
-            .map_err(|_| MediaError::overflow("PNG 8-bit sample exceeds u8")),
+        8 => u8::try_from(sample).map_err(|_| MediaError::overflow("PNG 8-bit sample exceeds u8")),
         16 => {
             let scaled = (u32::from(sample) * 255 + 32_767) / 65_535;
-            u8::try_from(scaled)
-                .map_err(|_| MediaError::overflow("PNG 16-bit scaling exceeds u8"))
+            u8::try_from(scaled).map_err(|_| MediaError::overflow("PNG 16-bit scaling exceeds u8"))
         }
         1 | 2 | 4 => {
             let max = (1_u32 << bit_depth) - 1;
