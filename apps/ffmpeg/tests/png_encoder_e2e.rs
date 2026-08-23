@@ -43,10 +43,10 @@ fn canonical_rgba_tga() -> Vec<u8> {
     bytes[12..14].copy_from_slice(&2_u16.to_le_bytes());
     bytes[14..16].copy_from_slice(&1_u16.to_le_bytes());
     bytes[16] = 32;
-    bytes[17] = 0x28; // top-left origin, 8 alpha bits
+    bytes[17] = 0x28;
     bytes.extend_from_slice(&[
-        0, 0, 255, 0, // red, fully transparent
-        0, 255, 0, 128, // green, half alpha
+        0, 0, 255, 0,
+        0, 255, 0, 128,
     ]);
     bytes
 }
@@ -86,7 +86,11 @@ fn flat_image_uses_compressed_zlib_and_is_materially_smaller_than_raw_pixels() {
 
     let idat = find_first_chunk(&encoded, b"IDAT").expect("PNG must contain IDAT");
     assert!(idat.len() >= 2);
-    assert_eq!(&idat[..2], &[0x78, 0x5E]);
+    assert_eq!(idat[0] & 0x0f, 8, "zlib must use DEFLATE");
+    assert_eq!(u16::from_be_bytes([idat[0], idat[1]]) % 31, 0);
+    // FFmpeg uses zlib's default compression level when unset; our level-6 default
+    // maps to the same FLEVEL=2 header class (normally 0x78 0x9C).
+    assert_eq!(idat[1] >> 6, 2);
     fs::remove_dir_all(dir).unwrap();
 }
 
