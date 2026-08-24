@@ -21,7 +21,7 @@ jobs:
           rustup default 1.98.0
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
-      - name: Apply candidate RGB CMYK YCCK decoder
+      - name: Apply FFmpeg-parity RGB CMYK YCCK decoder
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -45,6 +45,13 @@ jobs:
               ]
           }
           fn mul255(a:u8,b:u8)->u8 { ((u16::from(a)*u16::from(b)+127)/255) as u8 }
+          fn ffmpeg_ycck_to_rgb(y:u8, cb:u8, cr:u8, k:u8)->[u8;3] {
+              let k=i32::from(k);
+              let y2=((((255-i32::from(y))*k)*257)>>16).clamp(0,255) as u8;
+              let cb2=(((((128-i32::from(cb))*k)*257)>>16)+128).clamp(0,255) as u8;
+              let cr2=(((((128-i32::from(cr))*k)*257)>>16)+128).clamp(0,255) as u8;
+              ycbcr_to_rgb(y2,cb2,cr2)
+          }
           fn identify_color_model(frame:&Frame, adobe:Option<u8>)->Result<ColorModel>{
               match frame.components.len(){
                   1=>Ok(ColorModel::Gray),
@@ -63,14 +70,14 @@ jobs:
           }
           fn render(frame:Frame,qtables:&[Option<[u16;64]>;4],adobe:Option<u8>)->Result<VideoFrame>{
               let model=identify_color_model(&frame,adobe)?; let mut planes=Vec::with_capacity(frame.components.len());
-              for c in &frame.components{let qt=qtables[usize::from(c.tq)].as_ref().ok_or_else(||MediaError::invalid_data("missing JPEG quantization table"))?;let w=c.padded_blocks_x*8;let h=c.padded_blocks_y*8;let mut plane=vec![0u8;w*h];for by in 0..c.padded_blocks_y{for bx in 0..c.padded_blocks_x{let src=&c.coeffs[by*c.padded_blocks_x+bx];let mut dq=[0i32;64];for k in 0..64{dq[k]=src[k].checked_mul(i32::from(qt[k])).ok_or_else(||MediaError::overflow("JPEG dequantization overflow"))?;}let block=idct(&dq);for yy in 0..8{let dst=(by*8+yy)*w+bx*8;plane[dst..dst+8].copy_from_slice(&block[yy*8..yy*8+8]);}}}planes.push((plane,w));}
+              for c in &frame.components{let qt=qtables[usize::from(c.tq)].as_ref().ok_or_else(||MediaError::invalid_data("missing JPEG quantization table"))?;let w=c.padded_blocks_x*8;let h=c.padded_blocks_y*8;let mut plane=vec![0u8;w*h];for by in 0..c.padded_blocks_y{for bx in 0..c.padded_blocks_x{let src=&c.coeffs[by*c.padded_blocks_x+bx];let mut dq=[0i32;64];for z in 0..64{dq[z]=src[z].checked_mul(i32::from(qt[z])).ok_or_else(||MediaError::overflow("JPEG dequantization overflow"))?;}let block=idct(&dq);for yy in 0..8{let dst=(by*8+yy)*w+bx*8;plane[dst..dst+8].copy_from_slice(&block[yy*8..yy*8+8]);}}}planes.push((plane,w));}
               if model==ColorModel::Gray{let (pl,stride)=&planes[0];let mut out=vec![0u8;frame.width*frame.height];for y in 0..frame.height{out[y*frame.width..(y+1)*frame.width].copy_from_slice(&pl[y**stride..y**stride+frame.width]);}return VideoFrame::from_vec(u32::try_from(frame.width).unwrap(),u32::try_from(frame.height).unwrap(),PixelFormat::Gray8,out);}
               let mut out=Vec::with_capacity(frame.width*frame.height*3);for y in 0..frame.height{for x in 0..frame.width{let mut v=[0u8;4];for ci in 0..frame.components.len(){let c=&frame.components[ci];let sx=x*usize::from(c.h)/usize::from(frame.max_h);let sy=y*usize::from(c.v)/usize::from(frame.max_v);v[ci]=planes[ci].0[sy*planes[ci].1+sx];}let rgb=match model{
                   ColorModel::Gray=>unreachable!(),
                   ColorModel::Rgb=>[v[0],v[1],v[2]],
                   ColorModel::Ycbcr=>ycbcr_to_rgb(v[0],v[1],v[2]),
                   ColorModel::Cmyk=>if adobe==Some(0){[mul255(v[0],v[3]),mul255(v[1],v[3]),mul255(v[2],v[3])]}else{[mul255(255-v[0],255-v[3]),mul255(255-v[1],255-v[3]),mul255(255-v[2],255-v[3])]},
-                  ColorModel::Ycck=>ycbcr_to_rgb(v[0],v[1],v[2]),
+                  ColorModel::Ycck=>ffmpeg_ycck_to_rgb(v[0],v[1],v[2],v[3]),
               };out.extend_from_slice(&rgb);}}VideoFrame::from_vec(u32::try_from(frame.width).unwrap(),u32::try_from(frame.height).unwrap(),PixelFormat::Rgb24,out)
           }
           '''+s[end:]
