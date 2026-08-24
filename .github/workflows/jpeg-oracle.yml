@@ -5,17 +5,37 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   jpeg-independent-oracle:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
       - name: Install pinned Rust
         run: |
-          rustup toolchain install 1.98.0 --profile minimal
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt
           rustup default 1.98.0
+      - name: Normalize Rust formatting
+        run: cargo fmt --all
+      - name: Commit formatting if needed
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- '*.rs'
+          git commit -m "style: normalize JPEG implementation formatting"
+          git push origin "HEAD:${{ github.head_ref }}"
+      - name: Install independent FFmpeg oracle
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          command -v ffmpeg
       - name: Build rustmpeg ffmpeg
         run: cargo build -p rustmpeg-ffmpeg
       - name: Generate RGB source
@@ -109,10 +129,10 @@ jobs:
       - name: Validate restart, non-interleaved, and progressive-restart corpus against system FFmpeg
         run: |
           set -euo pipefail
-          test -x /usr/bin/ffmpeg
+          reference_ffmpeg="$(command -v ffmpeg)"
           for name in restarts non-interleaved-mcu rst_1block rst_8block progressive_rst_420; do
             echo "testing $name"
             target/debug/ffmpeg -hide_banner -y -i "/tmp/$name.jpg" "/tmp/rustmpeg-$name.ppm"
-            /usr/bin/ffmpeg -v error -y -i "/tmp/$name.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/reference-$name.rgb"
+            "$reference_ffmpeg" -v error -y -i "/tmp/$name.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/reference-$name.rgb"
             python3 /tmp/compare_raw.py "/tmp/rustmpeg-$name.ppm" "/tmp/reference-$name.rgb" 16
           done
