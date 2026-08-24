@@ -37,6 +37,15 @@ struct ScanComponent {
     ac_table: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ColorModel {
+    Gray,
+    Ycbcr,
+    Rgb,
+    Cmyk,
+    Ycck,
+}
+
 struct Frame {
     width: usize,
     height: usize,
@@ -283,9 +292,9 @@ fn parse_frame(marker: u8, data: &[u8]) -> Result<Frame> {
     let height = usize::from(u16::from_be_bytes([data[1], data[2]]));
     let width = usize::from(u16::from_be_bytes([data[3], data[4]]));
     let count = usize::from(data[5]);
-    if width == 0 || height == 0 || !(count == 1 || count == 3) {
+    if width == 0 || height == 0 || !(count == 1 || count == 3 || count == 4) {
         return Err(MediaError::unsupported(
-            "JPEG frame must contain 1 or 3 components",
+            "JPEG frame must contain 1, 3, or 4 components",
         ));
     }
     if data.len() != 6 + count * 3 {
@@ -846,76 +855,133 @@ fn idct(coefficients: &[i32; 64]) -> [u8; 64] {
     out
 }
 
-fn render(frame: Frame, qtables: &[Option<[u16; 64]>; 4]) -> Result<VideoFrame> {
+fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
+    let yy = f64::from(y);
+    let cb = f64::from(cb) - 128.0;
+    let cr = f64::from(cr) - 128.0;
+    [
+        (yy + 1.402 * cr).round().clamp(0.0, 255.0) as u8,
+        (yy - 0.344_136 * cb - 0.714_136 * cr)
+            .round()
+            .clamp(0.0, 255.0) as u8,
+        (yy + 1.772 * cb).round().clamp(0.0, 255.0) as u8,
+    ]
+}
+fn mul255(a: u8, b: u8) -> u8 {
+    ((u16::from(a) * u16::from(b) + 127) / 255) as u8
+}
+fn ffmpeg_ycck_to_rgb(y: u8, cb: u8, cr: u8, k: u8) -> [u8; 3] {
+    let k = i32::from(k);
+    let y2 = ((((255 - i32::from(y)) * k) * 257) >> 16).clamp(0, 255) as u8;
+    let cb2 = (((((128 - i32::from(cb)) * k) * 257) >> 16) + 128).clamp(0, 255) as u8;
+    let cr2 = (((((128 - i32::from(cr)) * k) * 257) >> 16) + 128).clamp(0, 255) as u8;
+    ycbcr_to_rgb(y2, cb2, cr2)
+}
+fn identify_color_model(frame: &Frame, adobe: Option<u8>) -> Result<ColorModel> {
+    match frame.components.len() {
+        1 => Ok(ColorModel::Gray),
+        3 => {
+            let ids: Vec<u8> = frame.components.iter().map(|c| c.id).collect();
+            if ids == [b'R', b'G', b'B'] || adobe == Some(0) {
+                Ok(ColorModel::Rgb)
+            } else if adobe == Some(2) {
+                Err(MediaError::invalid_data(
+                    "Adobe YCCK transform requires four JPEG components",
+                ))
+            } else {
+                Ok(ColorModel::Ycbcr)
+            }
+        }
+        4 => match adobe {
+            Some(2) => Ok(ColorModel::Ycck),
+            Some(1) => Err(MediaError::invalid_data(
+                "Adobe YCbCr transform cannot describe four JPEG components",
+            )),
+            Some(0) | None => Ok(ColorModel::Cmyk),
+            Some(_) => Err(MediaError::unsupported(
+                "unsupported Adobe JPEG color transform",
+            )),
+        },
+        _ => Err(MediaError::unsupported("unsupported JPEG component count")),
+    }
+}
+fn render(frame: Frame, qtables: &[Option<[u16; 64]>; 4], adobe: Option<u8>) -> Result<VideoFrame> {
+    let model = identify_color_model(&frame, adobe)?;
     let mut planes = Vec::with_capacity(frame.components.len());
-    for component in &frame.components {
-        let qtable = qtables[usize::from(component.tq)]
+    for c in &frame.components {
+        let qt = qtables[usize::from(c.tq)]
             .as_ref()
             .ok_or_else(|| MediaError::invalid_data("missing JPEG quantization table"))?;
-        let width = component.padded_blocks_x * 8;
-        let height = component.padded_blocks_y * 8;
-        let mut plane = vec![0u8; width * height];
-        for by in 0..component.padded_blocks_y {
-            for bx in 0..component.padded_blocks_x {
-                let source = &component.coeffs[by * component.padded_blocks_x + bx];
-                let mut dequantized = [0i32; 64];
-                for k in 0..64 {
-                    dequantized[k] = source[k]
-                        .checked_mul(i32::from(qtable[k]))
+        let w = c.padded_blocks_x * 8;
+        let h = c.padded_blocks_y * 8;
+        let mut plane = vec![0u8; w * h];
+        for by in 0..c.padded_blocks_y {
+            for bx in 0..c.padded_blocks_x {
+                let src = &c.coeffs[by * c.padded_blocks_x + bx];
+                let mut dq = [0i32; 64];
+                for z in 0..64 {
+                    dq[z] = src[z]
+                        .checked_mul(i32::from(qt[z]))
                         .ok_or_else(|| MediaError::overflow("JPEG dequantization overflow"))?;
                 }
-                let block = idct(&dequantized);
-                for y in 0..8 {
-                    let dst = (by * 8 + y) * width + bx * 8;
-                    plane[dst..dst + 8].copy_from_slice(&block[y * 8..y * 8 + 8]);
+                let block = idct(&dq);
+                for yy in 0..8 {
+                    let dst = (by * 8 + yy) * w + bx * 8;
+                    plane[dst..dst + 8].copy_from_slice(&block[yy * 8..yy * 8 + 8]);
                 }
             }
         }
-        planes.push((plane, width, height));
+        planes.push((plane, w));
     }
-
-    if frame.components.len() == 1 {
-        let (plane, stride, _) = &planes[0];
-        let mut output = vec![0u8; frame.width * frame.height];
+    if model == ColorModel::Gray {
+        let (pl, stride) = &planes[0];
+        let mut out = vec![0u8; frame.width * frame.height];
         for y in 0..frame.height {
-            output[y * frame.width..(y + 1) * frame.width]
-                .copy_from_slice(&plane[y * *stride..y * *stride + frame.width]);
+            out[y * frame.width..(y + 1) * frame.width]
+                .copy_from_slice(&pl[y * *stride..y * *stride + frame.width]);
         }
         return VideoFrame::from_vec(
             u32::try_from(frame.width).unwrap(),
             u32::try_from(frame.height).unwrap(),
             PixelFormat::Gray8,
-            output,
+            out,
         );
     }
-
-    let mut output = Vec::with_capacity(frame.width * frame.height * 3);
+    let mut out = Vec::with_capacity(frame.width * frame.height * 3);
     for y in 0..frame.height {
         for x in 0..frame.width {
-            let mut sample = [0u8; 3];
-            for ci in 0..3 {
-                let component = &frame.components[ci];
-                let sx = x * usize::from(component.h) / usize::from(frame.max_h);
-                let sy = y * usize::from(component.v) / usize::from(frame.max_v);
-                sample[ci] = planes[ci].0[sy * planes[ci].1 + sx];
+            let mut v = [0u8; 4];
+            for ci in 0..frame.components.len() {
+                let c = &frame.components[ci];
+                let sx = x * usize::from(c.h) / usize::from(frame.max_h);
+                let sy = y * usize::from(c.v) / usize::from(frame.max_v);
+                v[ci] = planes[ci].0[sy * planes[ci].1 + sx];
             }
-            let yy = f64::from(sample[0]);
-            let cb = f64::from(sample[1]) - 128.0;
-            let cr = f64::from(sample[2]) - 128.0;
-            output.push((yy + 1.402 * cr).round().clamp(0.0, 255.0) as u8);
-            output.push(
-                (yy - 0.344_136 * cb - 0.714_136 * cr)
-                    .round()
-                    .clamp(0.0, 255.0) as u8,
-            );
-            output.push((yy + 1.772 * cb).round().clamp(0.0, 255.0) as u8);
+            let rgb = match model {
+                ColorModel::Gray => unreachable!(),
+                ColorModel::Rgb => [v[0], v[1], v[2]],
+                ColorModel::Ycbcr => ycbcr_to_rgb(v[0], v[1], v[2]),
+                ColorModel::Cmyk => {
+                    if adobe == Some(0) {
+                        [mul255(v[0], v[3]), mul255(v[1], v[3]), mul255(v[2], v[3])]
+                    } else {
+                        [
+                            mul255(255 - v[0], 255 - v[3]),
+                            mul255(255 - v[1], 255 - v[3]),
+                            mul255(255 - v[2], 255 - v[3]),
+                        ]
+                    }
+                }
+                ColorModel::Ycck => ffmpeg_ycck_to_rgb(v[0], v[1], v[2], v[3]),
+            };
+            out.extend_from_slice(&rgb);
         }
     }
     VideoFrame::from_vec(
         u32::try_from(frame.width).unwrap(),
         u32::try_from(frame.height).unwrap(),
         PixelFormat::Rgb24,
-        output,
+        out,
     )
 }
 
@@ -929,6 +995,7 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<VideoFrame> {
     let mut dc_tables: [Option<Huffman>; 4] = [None, None, None, None];
     let mut ac_tables: [Option<Huffman>; 4] = [None, None, None, None];
     let mut restart_interval = 0u16;
+    let mut adobe_transform = None::<u8>;
     let mut saw_scan = false;
     let mut saw_eoi = false;
 
@@ -970,6 +1037,30 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<VideoFrame> {
             .ok_or_else(|| MediaError::eof("truncated JPEG segment"))?;
         pos = end;
         match marker {
+            0xee => {
+                if payload.starts_with(b"Adobe") {
+                    if payload.len() < 12 {
+                        return Err(MediaError::invalid_data(
+                            "truncated Adobe APP14 JPEG marker",
+                        ));
+                    }
+                    let t = payload[11];
+                    if t > 2 {
+                        return Err(MediaError::unsupported(
+                            "unsupported Adobe JPEG color transform",
+                        ));
+                    }
+                    if let Some(existing) = adobe_transform {
+                        if existing != t {
+                            return Err(MediaError::invalid_data(
+                                "conflicting Adobe APP14 JPEG transforms",
+                            ));
+                        }
+                    } else {
+                        adobe_transform = Some(t);
+                    }
+                }
+            }
             0xdb => parse_dqt(payload, &mut qtables)?,
             0xc4 => parse_dht(payload, &mut dc_tables, &mut ac_tables)?,
             0xdd => {
@@ -1033,7 +1124,7 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<VideoFrame> {
             }
         }
     }
-    render(frame, &qtables)
+    render(frame, &qtables, adobe_transform)
 }
 
 #[cfg(test)]
