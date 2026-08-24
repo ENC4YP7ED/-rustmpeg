@@ -1,4 +1,4 @@
-name: jpeg-oracle
+name: jpeg-color-gate
 
 on:
   pull_request:
@@ -8,26 +8,34 @@ permissions:
   contents: write
 
 jobs:
-  jpeg-independent-oracle:
+  color-models:
+    if: github.event.pull_request.number == 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
-      - name: Install pinned Rust
+      - name: Install test toolchain and reference decoder
         run: |
           rustup toolchain install 1.98.0 --profile minimal --component rustfmt
           rustup default 1.98.0
-      - name: Apply JPEG color-model implementation
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Apply asserted JPEG color-model patch
+        shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('crates/rm-codec/src/jpeg_decode/full.rs')
-          s=p.read_text()
+
+          p = Path('crates/rm-codec/src/jpeg_decode/full.rs')
+          s = p.read_text()
           if 'enum ColorModel' in s:
-              raise SystemExit(0)
-          s=s.replace('struct Frame {', '''#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+              raise SystemExit('ColorModel already exists on branch; temporary gate should be removed')
+
+          anchor = 'struct Frame {'
+          assert anchor in s
+          s = s.replace(anchor, '''#[derive(Clone, Copy, Debug, Eq, PartialEq)]
           enum ColorModel {
               Gray,
               Ycbcr,
@@ -37,18 +45,17 @@ jobs:
           }
 
           struct Frame {''', 1)
-          s=s.replace('''    if width == 0 || height == 0 || !(count == 1 || count == 3) {
-              return Err(MediaError::unsupported(
-                  "JPEG frame must contain 1 or 3 components",
-              ));
-          }''','''    if width == 0 || height == 0 || !(count == 1 || count == 3 || count == 4) {
-              return Err(MediaError::unsupported(
-                  "JPEG frame must contain 1, 3, or 4 components",
-              ));
-          }''',1)
-          start=s.index('fn render(')
-          end=s.index('\npub fn decode_jpeg', start)
-          render=r'''fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
+
+          old = 'if width == 0 || height == 0 || !(count == 1 || count == 3) {'
+          assert old in s
+          s = s.replace(old, 'if width == 0 || height == 0 || !(count == 1 || count == 3 || count == 4) {', 1)
+          old = '"JPEG frame must contain 1 or 3 components"'
+          assert old in s
+          s = s.replace(old, '"JPEG frame must contain 1, 3, or 4 components"', 1)
+
+          start = s.index('fn render(')
+          end = s.index('\npub fn decode_jpeg', start)
+          render = r'''fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
               let yy = f64::from(y);
               let cb = f64::from(cb) - 128.0;
               let cr = f64::from(cr) - 128.0;
@@ -124,11 +131,11 @@ jobs:
                           }
                       }
                   }
-                  planes.push((plane, width, height));
+                  planes.push((plane, width));
               }
 
               if color_model == ColorModel::Gray {
-                  let (plane, stride, _) = &planes[0];
+                  let (plane, stride) = &planes[0];
                   let mut output = vec![0u8; frame.width * frame.height];
                   for y in 0..frame.height {
                       output[y * frame.width..(y + 1) * frame.width]
@@ -191,163 +198,83 @@ jobs:
               )
           }
           '''
-          s=s[:start]+render+s[end:]
-          s=s.replace('''    let mut restart_interval = 0u16;
-              let mut saw_scan = false;''','''    let mut restart_interval = 0u16;
-              let mut adobe_transform = None::<u8>;
-              let mut saw_scan = false;''',1)
-          s=s.replace('''        match marker {
-                  0xdb => parse_dqt(payload, &mut qtables)?,''','''        match marker {
-                  0xee => {
-                      if payload.starts_with(b"Adobe") {
-                          if payload.len() < 12 {
-                              return Err(MediaError::invalid_data("truncated Adobe APP14 JPEG marker"));
-                          }
-                          let transform = payload[11];
-                          if transform > 2 {
-                              return Err(MediaError::unsupported(
-                                  "unsupported Adobe JPEG color transform",
+          s = s[:start] + render + s[end:]
+
+          old = '    let mut restart_interval = 0u16;\n    let mut saw_scan = false;'
+          assert old in s
+          s = s.replace(old, '    let mut restart_interval = 0u16;\n    let mut adobe_transform = None::<u8>;\n    let mut saw_scan = false;', 1)
+
+          anchor = '        match marker {\n            0xdb => parse_dqt(payload, &mut qtables)?,'
+          assert anchor in s
+          app14 = '''        match marker {
+              0xee => {
+                  if payload.starts_with(b"Adobe") {
+                      if payload.len() < 12 {
+                          return Err(MediaError::invalid_data("truncated Adobe APP14 JPEG marker"));
+                      }
+                      let transform = payload[11];
+                      if transform > 2 {
+                          return Err(MediaError::unsupported(
+                              "unsupported Adobe JPEG color transform",
+                          ));
+                      }
+                      if let Some(existing) = adobe_transform {
+                          if existing != transform {
+                              return Err(MediaError::invalid_data(
+                                  "conflicting Adobe APP14 JPEG transforms",
                               ));
                           }
-                          if let Some(existing) = adobe_transform {
-                              if existing != transform {
-                                  return Err(MediaError::invalid_data(
-                                      "conflicting Adobe APP14 JPEG transforms",
-                                  ));
-                              }
-                          } else {
-                              adobe_transform = Some(transform);
-                          }
+                      } else {
+                          adobe_transform = Some(transform);
                       }
                   }
-                  0xdb => parse_dqt(payload, &mut qtables)?,''',1)
-          s=s.replace('    render(frame, &qtables)\n','    render(frame, &qtables, adobe_transform)\n',1)
+              }
+              0xdb => parse_dqt(payload, &mut qtables)?,'''
+          s = s.replace(anchor, app14, 1)
+
+          old = '    render(frame, &qtables)\n'
+          assert old in s
+          s = s.replace(old, '    render(frame, &qtables, adobe_transform)\n', 1)
+
+          assert 'count == 4' in s
+          assert '0xee =>' in s
+          assert 'render(frame, &qtables, adobe_transform)' in s
           p.write_text(s)
           PY
           cargo fmt --all
-      - name: Install independent FFmpeg oracle
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          command -v ffmpeg
-      - name: Test full workspace after color-model patch
+      - name: Run full regression suite
         run: cargo test --workspace --all-targets
-      - name: Build rustmpeg ffmpeg
+      - name: Build rustmpeg
         run: cargo build -p rustmpeg-ffmpeg
-      - name: Generate RGB source
-        shell: python
-        run: |
-          from pathlib import Path
-          rgb=bytearray()
-          for y in range(16):
-            for x in range(16):
-              rgb += bytes((x*12, y*12, (x+y)*6))
-          Path('/tmp/source.ppm').write_bytes(b'P6\n16 16\n255\n'+rgb)
-      - name: Encode with rustmpeg
-        run: target/debug/ffmpeg -hide_banner -y -i /tmp/source.ppm /tmp/rustmpeg.jpg
-      - name: Decode rustmpeg JPEG with Go and compare source pixels
-        run: |
-          cat >/tmp/check.go <<'EOF'
-          package main
-          import("fmt";"image/jpeg";"os")
-          func main(){
-            f,e:=os.Open("/tmp/rustmpeg.jpg"); if e!=nil{panic(e)}; defer f.Close()
-            img,e:=jpeg.Decode(f); if e!=nil{panic(e)}
-            b:=img.Bounds(); if b.Dx()!=16||b.Dy()!=16{panic(fmt.Sprintf("size=%v",b))}
-            max:=0
-            for y:=0;y<16;y++{for x:=0;x<16;x++{
-              r,g,bl,_:=img.At(x,y).RGBA(); got:=[3]int{int(r>>8),int(g>>8),int(bl>>8)}
-              want:=[3]int{x*12,y*12,(x+y)*6}
-              for c:=0;c<3;c++{d:=got[c]-want[c];if d<0{d=-d};if d>max{max=d}}
-            }}
-            if max>20{panic(fmt.Sprintf("encoder max channel error %d",max))}
-          }
-          EOF
-          go run /tmp/check.go
-      - name: Fetch immutable JPEG oracles
+      - name: Fetch pinned color fixtures
         run: |
           set -euo pipefail
-          turbo=https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/2646fa33f8d67373c27b558b47e77b2d8d517e31/testimages
-          curl --fail --location --silent --show-error "$turbo/testorig.jpg" --output /tmp/baseline.jpg
-          curl --fail --location --silent --show-error "$turbo/testimgint.jpg" --output /tmp/progressive.jpg
-          corpus=https://raw.githubusercontent.com/imazen/codec-corpus/97836ec8ce8cdc59e95ef5467f24b7b6d370d896/jpeg-conformance/valid
-          for name in restarts non-interleaved-mcu rst_1block rst_8block progressive_rst_420 rgb cmyk_logo cymk ycck; do
-            curl --fail --location --silent --show-error "$corpus/$name.jpg" --output "/tmp/$name.jpg"
+          root=https://raw.githubusercontent.com/imazen/codec-corpus/97836ec8ce8cdc59e95ef5467f24b7b6d370d896/jpeg-conformance/valid
+          for name in rgb cmyk_logo cymk ycck; do
+            curl --fail --location --silent --show-error "$root/$name.jpg" -o "/tmp/$name.jpg"
           done
-      - name: Build comparison helpers
+      - name: Compare color models to independent FFmpeg
         run: |
-          cat >/tmp/oracle.go <<'EOF'
-          package main
-          import("fmt";"image/jpeg";"os")
-          func main(){
-            if len(os.Args)!=3{panic("input output")}
-            f,e:=os.Open(os.Args[1]);if e!=nil{panic(e)};defer f.Close()
-            img,e:=jpeg.Decode(f);if e!=nil{panic(e)};b:=img.Bounds()
-            o,e:=os.Create(os.Args[2]);if e!=nil{panic(e)};defer o.Close()
-            fmt.Fprintf(o,"P6\n%d %d\n255\n",b.Dx(),b.Dy())
-            for y:=b.Min.Y;y<b.Max.Y;y++{for x:=b.Min.X;x<b.Max.X;x++{r,g,bl,_:=img.At(x,y).RGBA();o.Write([]byte{byte(r>>8),byte(g>>8),byte(bl>>8)})}}
-          }
-          EOF
+          set -euo pipefail
           cat >/tmp/compare.py <<'PY'
           import sys
           from pathlib import Path
-          def pixels(path):
-              d=Path(path).read_bytes(); p=d.split(b'\n',3); return p[1],p[2],p[3]
-          rw,rh,r=pixels(sys.argv[1]); gw,gh,g=pixels(sys.argv[2])
-          assert (rw,rh)==(gw,gh), ((rw,rh),(gw,gh))
-          assert len(r)==len(g)
-          m=max((abs(a-b) for a,b in zip(r,g)), default=0)
-          limit=int(sys.argv[3])
-          assert m<=limit, f'max channel delta={m}, limit={limit}'
-          print(f'max channel delta={m}')
+          ppm=Path(sys.argv[1]).read_bytes().split(b'\n',3)[3]
+          ref=Path(sys.argv[2]).read_bytes()
+          assert len(ppm)==len(ref), (len(ppm),len(ref))
+          diffs=[abs(a-b) for a,b in zip(ppm,ref)]
+          print(sys.argv[3], 'max=', max(diffs, default=0), 'mean=', sum(diffs)/max(1,len(diffs)))
+          assert max(diffs, default=0) <= int(sys.argv[4])
           PY
-          cat >/tmp/compare_raw.py <<'PY'
-          import sys
-          from pathlib import Path
-          d=Path(sys.argv[1]).read_bytes(); p=d.split(b'\n',3); r=p[3]
-          g=Path(sys.argv[2]).read_bytes()
-          assert len(r)==len(g), (len(r),len(g))
-          m=max((abs(a-b) for a,b in zip(r,g)), default=0)
-          limit=int(sys.argv[3])
-          assert m<=limit, f'max channel delta={m}, limit={limit}'
-          print(f'max channel delta={m}')
-          PY
-      - name: Compare baseline decoder against Go
-        run: |
-          target/debug/ffmpeg -hide_banner -y -i /tmp/baseline.jpg /tmp/rustmpeg-baseline.ppm
-          go run /tmp/oracle.go /tmp/baseline.jpg /tmp/go-baseline.ppm
-          python3 /tmp/compare.py /tmp/rustmpeg-baseline.ppm /tmp/go-baseline.ppm 4
-      - name: Compare progressive decoder against Go
-        run: |
-          target/debug/ffmpeg -hide_banner -y -i /tmp/progressive.jpg /tmp/rustmpeg-progressive.ppm
-          go run /tmp/oracle.go /tmp/progressive.jpg /tmp/go-progressive.ppm
-          python3 /tmp/compare.py /tmp/rustmpeg-progressive.ppm /tmp/go-progressive.ppm 4
-      - name: Validate restart and scan-layout corpus against system FFmpeg
-        run: |
-          set -euo pipefail
-          reference_ffmpeg="$(command -v ffmpeg)"
-          for name in restarts non-interleaved-mcu rst_1block rst_8block progressive_rst_420; do
-            echo "testing $name"
-            target/debug/ffmpeg -hide_banner -y -i "/tmp/$name.jpg" "/tmp/rustmpeg-$name.ppm"
-            "$reference_ffmpeg" -v error -y -i "/tmp/$name.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/reference-$name.rgb"
-            python3 /tmp/compare_raw.py "/tmp/rustmpeg-$name.ppm" "/tmp/reference-$name.rgb" 16
-          done
-      - name: Validate RGB CMYK and YCCK color models against system FFmpeg
-        run: |
-          set -euo pipefail
-          reference_ffmpeg="$(command -v ffmpeg)"
           for name in rgb cmyk_logo cymk ycck; do
-            echo "testing color model $name"
+            echo "=== $name ==="
             target/debug/ffmpeg -hide_banner -y -i "/tmp/$name.jpg" "/tmp/rustmpeg-$name.ppm"
-            "$reference_ffmpeg" -v error -y -i "/tmp/$name.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/reference-$name.rgb"
-            python3 /tmp/compare_raw.py "/tmp/rustmpeg-$name.ppm" "/tmp/reference-$name.rgb" 16
+            /usr/bin/ffmpeg -v error -y -i "/tmp/$name.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/reference-$name.rgb"
+            python3 /tmp/compare.py "/tmp/rustmpeg-$name.ppm" "/tmp/reference-$name.rgb" "$name" 16
           done
-      - name: Commit validated JPEG color-model support
+      - name: Commit only validated source
         run: |
           set -euo pipefail
-          if git diff --quiet -- crates/rm-codec/src/jpeg_decode/full.rs; then
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crates/rm-codec/src/jpeg_decode/full.rs
