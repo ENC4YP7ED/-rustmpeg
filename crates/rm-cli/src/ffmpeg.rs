@@ -2,6 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use rm_codec::png::{PngEncodeOptions, PngPrediction, encode_png_with_options};
 use rm_codec::{
     CodecId, MediaType, convert_pcm, descriptor, find_by_name, pcm_bits_per_sample,
     pcm_bytes_per_sample,
@@ -43,6 +44,11 @@ struct Options {
     size: Option<(u32, u32)>,
     input_framerate: Rational,
     output_framerate: Option<Rational>,
+    png_prediction: PngPrediction,
+    png_compression_level: u8,
+    png_dpi: Option<u32>,
+    png_dpm: Option<u32>,
+    png_interlaced: bool,
 }
 
 impl Default for Options {
@@ -63,6 +69,11 @@ impl Default for Options {
             size: None,
             input_framerate: Rational::new(25, 1).expect("25/1 is a valid rational"),
             output_framerate: None,
+            png_prediction: PngPrediction::Paeth,
+            png_compression_level: 6,
+            png_dpi: None,
+            png_dpm: None,
+            png_interlaced: false,
         }
     }
 }
@@ -339,12 +350,12 @@ fn run_image2(options: &Options, input: &Path, output: &Path) -> Result<()> {
                     )));
                 }
                 let prepared = prepare_frame(&decoded.frame, codec, options.size)?;
-                (codec, encode_image(codec, &prepared)?)
+                (codec, encode_output_image(codec, &prepared, options)?)
             }
             None => {
                 let codec = codec_for_path(output_path).unwrap_or(decoded.codec);
                 let prepared = prepare_frame(&decoded.frame, codec, options.size)?;
-                (codec, encode_image(codec, &prepared)?)
+                (codec, encode_output_image(codec, &prepared, options)?)
             }
         };
 
@@ -407,6 +418,28 @@ fn run_image2(options: &Options, input: &Path, output: &Path) -> Result<()> {
         total_bytes
     );
     Ok(())
+}
+
+fn encode_output_image(
+    codec: CodecId,
+    frame: &rm_core::video::VideoFrame,
+    options: &Options,
+) -> Result<Vec<u8>> {
+    if codec == CodecId::Png {
+        encode_png_with_options(
+            frame,
+            PngEncodeOptions {
+                prediction: options.png_prediction,
+                compression_level: options.png_compression_level,
+                dpi: options.png_dpi,
+                dpm: options.png_dpm,
+                interlaced: options.png_interlaced,
+                sample_aspect_ratio: (0, 1),
+            },
+        )
+    } else {
+        encode_image(codec, frame)
+    }
 }
 
 fn check_output(output: &Path, options: &Options) -> Result<()> {
@@ -572,6 +605,65 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
                     || MediaError::unsupported(format!("codec '{value}' is not implemented yet")),
                 )?))
             };
+        } else if is(arg, "-pred") {
+            index += 1;
+            let value = args
+                .get(index)
+                .ok_or_else(|| MediaError::invalid_argument("missing value after -pred"))?;
+            options.png_prediction = PngPrediction::parse(&value.to_string_lossy())?;
+        } else if is(arg, "-compression_level") {
+            index += 1;
+            let value = parse_usize(
+                args.get(index).ok_or_else(|| {
+                    MediaError::invalid_argument("missing value after -compression_level")
+                })?,
+                "compression_level",
+            )?;
+            options.png_compression_level = u8::try_from(value)
+                .map_err(|_| MediaError::invalid_argument("compression_level must be in 0..=9"))?;
+            if options.png_compression_level > 9 {
+                return Err(MediaError::invalid_argument(
+                    "compression_level must be in 0..=9",
+                ));
+            }
+        } else if is(arg, "-dpi") || is(arg, "-dpm") {
+            let dpi = is(arg, "-dpi");
+            index += 1;
+            let value = parse_usize(
+                args.get(index)
+                    .ok_or_else(|| MediaError::invalid_argument("missing PNG density value"))?,
+                if dpi { "dpi" } else { "dpm" },
+            )?;
+            let value = u32::try_from(value)
+                .map_err(|_| MediaError::invalid_argument("PNG density exceeds u32"))?;
+            if value > 0x1_0000 {
+                return Err(MediaError::invalid_argument(
+                    "PNG dpi/dpm must be in 0..=65536",
+                ));
+            }
+            if dpi {
+                options.png_dpi = Some(value);
+            } else {
+                options.png_dpm = Some(value);
+            }
+        } else if is(arg, "-flags") {
+            index += 1;
+            let flags = args
+                .get(index)
+                .ok_or_else(|| MediaError::invalid_argument("missing value after -flags"))?
+                .to_string_lossy();
+            for token in flags.split(|c| c == '+' || c == '-') {
+                if token.is_empty() {
+                    continue;
+                }
+                if token.eq_ignore_ascii_case("ildct") {
+                    options.png_interlaced = !flags.contains("-ildct");
+                } else if !token.eq_ignore_ascii_case("bitexact") {
+                    return Err(MediaError::unsupported(format!(
+                        "codec flag '{token}' is not implemented yet"
+                    )));
+                }
+            }
         } else if is(arg, "-y") {
             options.overwrite = true;
         } else if is(arg, "-n") {
@@ -605,6 +697,15 @@ fn parse_options(args: &[OsString]) -> Result<Options> {
             "-y and -n cannot be used together",
         ));
     }
+    PngEncodeOptions {
+        prediction: options.png_prediction,
+        compression_level: options.png_compression_level,
+        dpi: options.png_dpi,
+        dpm: options.png_dpm,
+        interlaced: options.png_interlaced,
+        sample_aspect_ratio: (0, 1),
+    }
+    .validate()?;
     Ok(options)
 }
 

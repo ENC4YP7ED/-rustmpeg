@@ -3,6 +3,8 @@
 pub mod bmp;
 pub mod png;
 pub mod png_encode;
+pub mod png_ffmpeg_encode;
+pub mod png_options;
 pub mod pnm;
 pub mod tga;
 

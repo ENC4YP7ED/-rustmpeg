@@ -3,7 +3,8 @@ mod adam7;
 #[path = "png_baseline.rs"]
 mod baseline;
 
-pub use crate::png_encode::encode_png;
+pub use crate::png_ffmpeg_encode::{encode_png, encode_png_with_options};
+pub use crate::png_options::{PngEncodeOptions, PngPrediction};
 pub use baseline::probe_png;
 
 use rm_compress::{crc32, zlib};
