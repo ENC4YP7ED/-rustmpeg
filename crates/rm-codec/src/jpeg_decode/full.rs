@@ -4,9 +4,9 @@ use rm_core::video::{PixelFormat, VideoFrame};
 use rm_core::{MediaError, Result};
 
 const ZIGZAG: [usize; 64] = [
-    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34,
-    27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37,
-    44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
+    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20,
+    13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59,
+    52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63,
 ];
 
 #[derive(Clone)]
@@ -56,7 +56,11 @@ struct BitReader<'a> {
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0, bit: 0 }
+        Self {
+            data,
+            pos: 0,
+            bit: 0,
+        }
     }
 
     fn read_bit(&mut self) -> Result<u8> {
@@ -110,7 +114,9 @@ fn receive_extend(reader: &mut BitReader<'_>, count: u8) -> Result<i32> {
         return Ok(0);
     }
     if count > 16 {
-        return Err(MediaError::invalid_data("JPEG coefficient magnitude is too large"));
+        return Err(MediaError::invalid_data(
+            "JPEG coefficient magnitude is too large",
+        ));
     }
     let value = reader.read_bits(count)? as i32;
     let threshold = 1i32 << (count - 1);
@@ -176,7 +182,11 @@ fn split_entropy(raw: &[u8]) -> Result<Entropy> {
                 segments.push(Vec::new());
                 pos = next + 1;
             }
-            _ => return Err(MediaError::invalid_data("unexpected marker in JPEG scan payload")),
+            _ => {
+                return Err(MediaError::invalid_data(
+                    "unexpected marker in JPEG scan payload",
+                ));
+            }
         }
     }
     Ok(Entropy { segments, restarts })
@@ -185,7 +195,9 @@ fn split_entropy(raw: &[u8]) -> Result<Entropy> {
 fn parse_dqt(data: &[u8], tables: &mut [Option<[u16; 64]>; 4]) -> Result<()> {
     let mut pos = 0usize;
     while pos < data.len() {
-        let spec = *data.get(pos).ok_or_else(|| MediaError::eof("truncated JPEG DQT"))?;
+        let spec = *data
+            .get(pos)
+            .ok_or_else(|| MediaError::eof("truncated JPEG DQT"))?;
         pos += 1;
         let precision = spec >> 4;
         let id = usize::from(spec & 0x0f);
@@ -195,7 +207,9 @@ fn parse_dqt(data: &[u8], tables: &mut [Option<[u16; 64]>; 4]) -> Result<()> {
         let mut table = [0u16; 64];
         for zz in 0..64 {
             let value = if precision == 0 {
-                let value = *data.get(pos).ok_or_else(|| MediaError::eof("truncated JPEG DQT"))?;
+                let value = *data
+                    .get(pos)
+                    .ok_or_else(|| MediaError::eof("truncated JPEG DQT"))?;
                 pos += 1;
                 u16::from(value)
             } else {
@@ -206,7 +220,9 @@ fn parse_dqt(data: &[u8], tables: &mut [Option<[u16; 64]>; 4]) -> Result<()> {
                 u16::from_be_bytes([pair[0], pair[1]])
             };
             if value == 0 {
-                return Err(MediaError::invalid_data("JPEG quantizer cannot contain zero"));
+                return Err(MediaError::invalid_data(
+                    "JPEG quantizer cannot contain zero",
+                ));
             }
             table[ZIGZAG[zz]] = value;
         }
@@ -215,10 +231,16 @@ fn parse_dqt(data: &[u8], tables: &mut [Option<[u16; 64]>; 4]) -> Result<()> {
     Ok(())
 }
 
-fn parse_dht(data: &[u8], dc: &mut [Option<Huffman>; 4], ac: &mut [Option<Huffman>; 4]) -> Result<()> {
+fn parse_dht(
+    data: &[u8],
+    dc: &mut [Option<Huffman>; 4],
+    ac: &mut [Option<Huffman>; 4],
+) -> Result<()> {
     let mut pos = 0usize;
     while pos < data.len() {
-        let spec = *data.get(pos).ok_or_else(|| MediaError::eof("truncated JPEG DHT"))?;
+        let spec = *data
+            .get(pos)
+            .ok_or_else(|| MediaError::eof("truncated JPEG DHT"))?;
         pos += 1;
         let class = spec >> 4;
         let id = usize::from(spec & 0x0f);
@@ -233,7 +255,9 @@ fn parse_dht(data: &[u8], dc: &mut [Option<Huffman>; 4], ac: &mut [Option<Huffma
         counts.copy_from_slice(counts_slice);
         let symbol_count: usize = counts.iter().map(|&value| usize::from(value)).sum();
         if symbol_count == 0 || symbol_count > 256 {
-            return Err(MediaError::invalid_data("invalid JPEG Huffman symbol count"));
+            return Err(MediaError::invalid_data(
+                "invalid JPEG Huffman symbol count",
+            ));
         }
         let symbols = data
             .get(pos..pos + symbol_count)
@@ -252,16 +276,22 @@ fn parse_dht(data: &[u8], dc: &mut [Option<Huffman>; 4], ac: &mut [Option<Huffma
 
 fn parse_frame(marker: u8, data: &[u8]) -> Result<Frame> {
     if data.len() < 6 || data[0] != 8 {
-        return Err(MediaError::unsupported("only 8-bit Huffman JPEG frames are implemented"));
+        return Err(MediaError::unsupported(
+            "only 8-bit Huffman JPEG frames are implemented",
+        ));
     }
     let height = usize::from(u16::from_be_bytes([data[1], data[2]]));
     let width = usize::from(u16::from_be_bytes([data[3], data[4]]));
     let count = usize::from(data[5]);
     if width == 0 || height == 0 || !(count == 1 || count == 3) {
-        return Err(MediaError::unsupported("JPEG frame must contain 1 or 3 components"));
+        return Err(MediaError::unsupported(
+            "JPEG frame must contain 1 or 3 components",
+        ));
     }
     if data.len() != 6 + count * 3 {
-        return Err(MediaError::invalid_data("JPEG SOF component table length mismatch"));
+        return Err(MediaError::invalid_data(
+            "JPEG SOF component table length mismatch",
+        ));
     }
     let mut specs = Vec::with_capacity(count);
     let mut max_h = 0u8;
@@ -270,7 +300,9 @@ fn parse_frame(marker: u8, data: &[u8]) -> Result<Frame> {
         let h = item[1] >> 4;
         let v = item[1] & 0x0f;
         if h == 0 || v == 0 || h > 4 || v > 4 || item[2] > 3 {
-            return Err(MediaError::invalid_data("invalid JPEG component sampling/table selector"));
+            return Err(MediaError::invalid_data(
+                "invalid JPEG component sampling/table selector",
+            ));
         }
         if specs.iter().any(|&(id, _, _, _)| id == item[0]) {
             return Err(MediaError::invalid_data("duplicate JPEG component id"));
@@ -319,7 +351,11 @@ fn parse_frame(marker: u8, data: &[u8]) -> Result<Frame> {
 }
 
 fn parse_scan_header(frame: &Frame, data: &[u8]) -> Result<(Vec<ScanComponent>, u8, u8, u8, u8)> {
-    let count = usize::from(*data.first().ok_or_else(|| MediaError::eof("empty JPEG SOS"))?);
+    let count = usize::from(
+        *data
+            .first()
+            .ok_or_else(|| MediaError::eof("empty JPEG SOS"))?,
+    );
     if count == 0 || count > frame.components.len() || data.len() != 1 + count * 2 + 3 {
         return Err(MediaError::invalid_data("invalid JPEG SOS component table"));
     }
@@ -338,9 +374,15 @@ fn parse_scan_header(frame: &Frame, data: &[u8]) -> Result<(Vec<ScanComponent>, 
         let dc_table = usize::from(selectors >> 4);
         let ac_table = usize::from(selectors & 0x0f);
         if dc_table > 3 || ac_table > 3 {
-            return Err(MediaError::invalid_data("invalid JPEG scan Huffman selector"));
+            return Err(MediaError::invalid_data(
+                "invalid JPEG scan Huffman selector",
+            ));
         }
-        scan.push(ScanComponent { ci, dc_table, ac_table });
+        scan.push(ScanComponent {
+            ci,
+            dc_table,
+            ac_table,
+        });
     }
     let ss = data[1 + count * 2];
     let se = data[2 + count * 2];
@@ -348,28 +390,43 @@ fn parse_scan_header(frame: &Frame, data: &[u8]) -> Result<(Vec<ScanComponent>, 
     let ah = ah_al >> 4;
     let al = ah_al & 0x0f;
     if ss > se || se > 63 || ah > 13 || al > 13 {
-        return Err(MediaError::invalid_data("invalid JPEG spectral/refinement parameters"));
+        return Err(MediaError::invalid_data(
+            "invalid JPEG spectral/refinement parameters",
+        ));
     }
     if ss != 0 && scan.len() != 1 {
-        return Err(MediaError::invalid_data("JPEG AC scans must contain one component"));
+        return Err(MediaError::invalid_data(
+            "JPEG AC scans must contain one component",
+        ));
     }
     if !frame.progressive && (ss != 0 || se != 63 || ah != 0 || al != 0) {
-        return Err(MediaError::unsupported("non-progressive JPEG scan is not sequential"));
+        return Err(MediaError::unsupported(
+            "non-progressive JPEG scan is not sequential",
+        ));
     }
     if frame.progressive && ah != 0 && ah != al + 1 {
-        return Err(MediaError::invalid_data("invalid JPEG progressive successive approximation"));
+        return Err(MediaError::invalid_data(
+            "invalid JPEG progressive successive approximation",
+        ));
     }
     Ok((scan, ss, se, ah, al))
 }
 
-fn block_index(frame: &Frame, scan: &[ScanComponent], mcu: usize, sub: usize) -> Result<(usize, usize)> {
+fn block_index(
+    frame: &Frame,
+    scan: &[ScanComponent],
+    mcu: usize,
+    sub: usize,
+) -> Result<(usize, usize)> {
     if scan.len() == 1 {
         let ci = scan[0].ci;
         let component = &frame.components[ci];
         let x = mcu % component.actual_blocks_x;
         let y = mcu / component.actual_blocks_x;
         if y >= component.actual_blocks_y || sub != 0 {
-            return Err(MediaError::invalid_data("JPEG non-interleaved block index out of range"));
+            return Err(MediaError::invalid_data(
+                "JPEG non-interleaved block index out of range",
+            ));
         }
         return Ok((ci, y * component.padded_blocks_x + x));
     }
@@ -405,11 +462,15 @@ fn validate_restarts(entropy: &Entropy, mcu_count: usize, interval: u16) -> Resu
         (mcu_count - 1) / usize::from(interval)
     };
     if entropy.restarts.len() != expected || entropy.segments.len() != expected + 1 {
-        return Err(MediaError::invalid_data("JPEG restart marker count mismatch"));
+        return Err(MediaError::invalid_data(
+            "JPEG restart marker count mismatch",
+        ));
     }
     for (index, &marker) in entropy.restarts.iter().enumerate() {
         if marker != 0xd0 + u8::try_from(index % 8).unwrap() {
-            return Err(MediaError::invalid_data("JPEG restart marker sequence mismatch"));
+            return Err(MediaError::invalid_data(
+                "JPEG restart marker sequence mismatch",
+            ));
         }
     }
     Ok(())
@@ -446,7 +507,9 @@ fn decode_sequential_block(
             break;
         }
         if size > 10 {
-            return Err(MediaError::invalid_data("invalid baseline JPEG AC magnitude"));
+            return Err(MediaError::invalid_data(
+                "invalid baseline JPEG AC magnitude",
+            ));
         }
         k += run;
         if k >= 64 {
@@ -484,10 +547,13 @@ fn decode_progressive_block(
     let bit = 1i32 << al;
     if ss == 0 {
         if ah == 0 {
-            let table = dc_table.ok_or_else(|| MediaError::invalid_data("missing progressive JPEG DC table"))?;
+            let table = dc_table
+                .ok_or_else(|| MediaError::invalid_data("missing progressive JPEG DC table"))?;
             let size = decode_huff(reader, table)?;
             if size > 11 {
-                return Err(MediaError::invalid_data("invalid progressive JPEG DC magnitude"));
+                return Err(MediaError::invalid_data(
+                    "invalid progressive JPEG DC magnitude",
+                ));
             }
             *predictor += receive_extend(reader, size)?;
             block[0] = *predictor << al;
@@ -497,7 +563,8 @@ fn decode_progressive_block(
         return Ok(());
     }
 
-    let table = ac_table.ok_or_else(|| MediaError::invalid_data("missing progressive JPEG AC table"))?;
+    let table =
+        ac_table.ok_or_else(|| MediaError::invalid_data("missing progressive JPEG AC table"))?;
     let start = usize::from(ss);
     let end = usize::from(se);
     if ah == 0 {
@@ -516,17 +583,25 @@ fn decode_progressive_block(
                     continue;
                 }
                 *eob_run = (1u32 << run)
-                    .checked_add(if run == 0 { 0 } else { reader.read_bits(run as u8)? })
+                    .checked_add(if run == 0 {
+                        0
+                    } else {
+                        reader.read_bits(run as u8)?
+                    })
                     .ok_or_else(|| MediaError::overflow("JPEG EOB run overflow"))?;
                 *eob_run -= 1;
                 break;
             }
             if size > 10 {
-                return Err(MediaError::invalid_data("invalid progressive JPEG AC magnitude"));
+                return Err(MediaError::invalid_data(
+                    "invalid progressive JPEG AC magnitude",
+                ));
             }
             k += run;
             if k > end {
-                return Err(MediaError::invalid_data("progressive JPEG AC run exceeds spectral band"));
+                return Err(MediaError::invalid_data(
+                    "progressive JPEG AC run exceeds spectral band",
+                ));
             }
             block[ZIGZAG[k]] = receive_extend(reader, size)? << al;
             k += 1;
@@ -554,14 +629,20 @@ fn decode_progressive_block(
         if size == 0 {
             if run != 15 {
                 *eob_run = (1u32 << run)
-                    .checked_add(if run == 0 { 0 } else { reader.read_bits(run as u8)? })
+                    .checked_add(if run == 0 {
+                        0
+                    } else {
+                        reader.read_bits(run as u8)?
+                    })
                     .ok_or_else(|| MediaError::overflow("JPEG EOB run overflow"))?;
                 *eob_run -= 1;
                 run = usize::MAX;
             }
         } else {
             if size != 1 {
-                return Err(MediaError::invalid_data("progressive AC refinement introduces non-unit coefficient"));
+                return Err(MediaError::invalid_data(
+                    "progressive AC refinement introduces non-unit coefficient",
+                ));
             }
             new_value = Some(if reader.read_bit()? != 0 { bit } else { -bit });
         }
@@ -650,7 +731,9 @@ fn decode_scan(
             }
         } else {
             if frame.progressive && !(ss == 0 && se == 0) {
-                return Err(MediaError::invalid_data("progressive interleaved scan may contain DC only"));
+                return Err(MediaError::invalid_data(
+                    "progressive interleaved scan may contain DC only",
+                ));
             }
             let mut entry_index = 0usize;
             for entry in scan {
@@ -661,7 +744,8 @@ fn decode_scan(
                 let my = mcu / frame.mcus_x;
                 for by in 0..v {
                     for bx in 0..h {
-                        let bi = (my * v + by) * frame.components[ci].padded_blocks_x + (mx * h + bx);
+                        let bi =
+                            (my * v + by) * frame.components[ci].padded_blocks_x + (mx * h + bx);
                         let block = &mut frame.components[ci].coeffs[bi];
                         let dc = dc_tables[entry.dc_table].as_ref();
                         let ac = ac_tables[entry.ac_table].as_ref();
@@ -683,8 +767,12 @@ fn decode_scan(
                                 &mut reader,
                                 block,
                                 &mut predictors[ci],
-                                dc.ok_or_else(|| MediaError::invalid_data("missing JPEG DC table"))?,
-                                ac.ok_or_else(|| MediaError::invalid_data("missing JPEG AC table"))?,
+                                dc.ok_or_else(|| {
+                                    MediaError::invalid_data("missing JPEG DC table")
+                                })?,
+                                ac.ok_or_else(|| {
+                                    MediaError::invalid_data("missing JPEG AC table")
+                                })?,
                             )?;
                         }
                     }
@@ -700,20 +788,28 @@ fn decode_scan(
         if frame.progressive {
             if ss == 0 {
                 if ah == 0 && component.dc_seen {
-                    return Err(MediaError::invalid_data("duplicate progressive JPEG DC first scan"));
+                    return Err(MediaError::invalid_data(
+                        "duplicate progressive JPEG DC first scan",
+                    ));
                 }
                 if ah == 0 {
                     component.dc_seen = true;
                 } else if !component.dc_seen {
-                    return Err(MediaError::invalid_data("progressive JPEG DC refinement precedes first scan"));
+                    return Err(MediaError::invalid_data(
+                        "progressive JPEG DC refinement precedes first scan",
+                    ));
                 }
             } else {
                 for k in usize::from(ss)..=usize::from(se) {
                     if ah == 0 && component.ac_seen[k] {
-                        return Err(MediaError::invalid_data("overlapping progressive JPEG AC first scans"));
+                        return Err(MediaError::invalid_data(
+                            "overlapping progressive JPEG AC first scans",
+                        ));
                     }
                     if ah != 0 && !component.ac_seen[k] {
-                        return Err(MediaError::invalid_data("progressive JPEG AC refinement precedes first scan"));
+                        return Err(MediaError::invalid_data(
+                            "progressive JPEG AC refinement precedes first scan",
+                        ));
                     }
                 }
                 if ah == 0 {
@@ -807,7 +903,11 @@ fn render(frame: Frame, qtables: &[Option<[u16; 64]>; 4]) -> Result<VideoFrame> 
             let cb = f64::from(sample[1]) - 128.0;
             let cr = f64::from(sample[2]) - 128.0;
             output.push((yy + 1.402 * cr).round().clamp(0.0, 255.0) as u8);
-            output.push((yy - 0.344_136 * cb - 0.714_136 * cr).round().clamp(0.0, 255.0) as u8);
+            output.push(
+                (yy - 0.344_136 * cb - 0.714_136 * cr)
+                    .round()
+                    .clamp(0.0, 255.0) as u8,
+            );
             output.push((yy + 1.772 * cb).round().clamp(0.0, 255.0) as u8);
         }
     }
@@ -839,7 +939,9 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<VideoFrame> {
         while bytes.get(pos) == Some(&0xff) {
             pos += 1;
         }
-        let marker = *bytes.get(pos).ok_or_else(|| MediaError::eof("truncated JPEG marker"))?;
+        let marker = *bytes
+            .get(pos)
+            .ok_or_else(|| MediaError::eof("truncated JPEG marker"))?;
         pos += 1;
         match marker {
             0xd9 => {
@@ -847,7 +949,9 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<VideoFrame> {
                 break;
             }
             0xd8 | 0x01 | 0xd0..=0xd7 => {
-                return Err(MediaError::invalid_data("unexpected standalone JPEG marker"));
+                return Err(MediaError::invalid_data(
+                    "unexpected standalone JPEG marker",
+                ));
             }
             _ => {}
         }
@@ -903,14 +1007,18 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<VideoFrame> {
                 pos = scan_end;
             }
             0xc1 | 0xc3 | 0xc5..=0xc7 | 0xc9..=0xcf => {
-                return Err(MediaError::unsupported(format!("unsupported JPEG frame marker 0xff{marker:02x}")));
+                return Err(MediaError::unsupported(format!(
+                    "unsupported JPEG frame marker 0xff{marker:02x}"
+                )));
             }
             _ => {}
         }
     }
 
     if !saw_eoi || pos != bytes.len() {
-        return Err(MediaError::invalid_data("JPEG stream is missing clean EOI termination"));
+        return Err(MediaError::invalid_data(
+            "JPEG stream is missing clean EOI termination",
+        ));
     }
     if !saw_scan {
         return Err(MediaError::invalid_data("JPEG stream contains no scans"));
@@ -919,7 +1027,9 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<VideoFrame> {
     if frame.progressive {
         for component in &frame.components {
             if !component.dc_seen {
-                return Err(MediaError::invalid_data("progressive JPEG component has no DC first scan"));
+                return Err(MediaError::invalid_data(
+                    "progressive JPEG component has no DC first scan",
+                ));
             }
         }
     }
