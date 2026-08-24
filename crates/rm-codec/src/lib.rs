@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
 pub mod bmp;
+pub mod jpeg;
+pub mod jpeg_decode;
+pub mod jpeg_encode;
 pub mod png;
 pub mod png_encode;
 pub mod pnm;
@@ -31,6 +34,7 @@ pub enum CodecId {
     Bmp,
     Targa,
     Png,
+    Jpeg,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +47,7 @@ pub struct CodecDescriptor {
     pub can_encode: bool,
 }
 
-const CODECS: [CodecDescriptor; 12] = [
+const CODECS: [CodecDescriptor; 13] = [
     CodecDescriptor {
         id: CodecId::PcmU8,
         name: "pcm_u8",
@@ -140,6 +144,14 @@ const CODECS: [CodecDescriptor; 12] = [
         can_decode: true,
         can_encode: true,
     },
+    CodecDescriptor {
+        id: CodecId::Jpeg,
+        name: "mjpeg",
+        long_name: "MJPEG/JPEG image",
+        media_type: MediaType::Video,
+        can_decode: true,
+        can_encode: true,
+    },
 ];
 
 #[must_use]
@@ -162,6 +174,7 @@ pub const fn descriptor(id: CodecId) -> &'static CodecDescriptor {
         CodecId::Bmp => &CODECS[9],
         CodecId::Targa => &CODECS[10],
         CodecId::Png => &CODECS[11],
+        CodecId::Jpeg => &CODECS[12],
     }
 }
 
@@ -212,7 +225,8 @@ pub const fn pcm_bits_per_sample(id: CodecId) -> Option<u16> {
         | CodecId::Ppm
         | CodecId::Bmp
         | CodecId::Targa
-        | CodecId::Png => None,
+        | CodecId::Png
+        | CodecId::Jpeg => None,
     }
 }
 
@@ -234,7 +248,8 @@ pub const fn pcm_wave_format_tag(id: CodecId) -> Option<u16> {
         | CodecId::Ppm
         | CodecId::Bmp
         | CodecId::Targa
-        | CodecId::Png => None,
+        | CodecId::Png
+        | CodecId::Jpeg => None,
     }
 }
 
@@ -300,7 +315,8 @@ fn decode_sample(codec: CodecId, bytes: &[u8]) -> Result<f64> {
         | CodecId::Ppm
         | CodecId::Bmp
         | CodecId::Targa
-        | CodecId::Png => {
+        | CodecId::Png
+        | CodecId::Jpeg => {
             return Err(MediaError::invalid_argument("codec is not PCM"));
         }
     };
@@ -345,7 +361,8 @@ fn encode_sample(codec: CodecId, sample: f64, output: &mut Vec<u8>) -> Result<()
         | CodecId::Ppm
         | CodecId::Bmp
         | CodecId::Targa
-        | CodecId::Png => {
+        | CodecId::Png
+        | CodecId::Jpeg => {
             return Err(MediaError::invalid_argument("codec is not PCM"));
         }
     }

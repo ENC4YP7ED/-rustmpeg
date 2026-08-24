@@ -1,0 +1,118 @@
+name: jpeg-oracle
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust and independent FFmpeg
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Build rustmpeg
+        run: cargo build -p rustmpeg-ffmpeg
+      - name: Validate rustmpeg encoder with Go image/jpeg
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          rgb=bytearray()
+          for y in range(16):
+            for x in range(16):
+              rgb += bytes((x*12,y*12,(x+y)*6))
+          Path('/tmp/source.ppm').write_bytes(b'P6\n16 16\n255\n'+rgb)
+          PY
+          target/debug/ffmpeg -hide_banner -y -i /tmp/source.ppm /tmp/rustmpeg.jpg
+          cat >/tmp/check.go <<'EOF'
+          package main
+          import("fmt";"image/jpeg";"os")
+          func main(){
+            f,e:=os.Open("/tmp/rustmpeg.jpg");if e!=nil{panic(e)};defer f.Close()
+            img,e:=jpeg.Decode(f);if e!=nil{panic(e)};b:=img.Bounds()
+            if b.Dx()!=16||b.Dy()!=16{panic(fmt.Sprintf("size=%v",b))}
+            max:=0
+            for y:=0;y<16;y++{for x:=0;x<16;x++{r,g,bl,_:=img.At(x,y).RGBA();got:=[3]int{int(r>>8),int(g>>8),int(bl>>8)};want:=[3]int{x*12,y*12,(x+y)*6};for c:=0;c<3;c++{d:=got[c]-want[c];if d<0{d=-d};if d>max{max=d}}}}
+            if max>20{panic(fmt.Sprintf("encoder max channel error=%d",max))}
+          }
+          EOF
+          go run /tmp/check.go
+      - name: Fetch immutable JPEG fixtures
+        run: |
+          set -euo pipefail
+          turbo=https://raw.githubusercontent.com/libjpeg-turbo/libjpeg-turbo/2646fa33f8d67373c27b558b47e77b2d8d517e31/testimages
+          curl -fsSL "$turbo/testorig.jpg" -o /tmp/baseline.jpg
+          curl -fsSL "$turbo/testimgint.jpg" -o /tmp/progressive.jpg
+          corpus=https://raw.githubusercontent.com/imazen/codec-corpus/97836ec8ce8cdc59e95ef5467f24b7b6d370d896/jpeg-conformance/valid
+          for n in restarts non-interleaved-mcu rst_1block rst_8block rst_16block rst_1row rst_2row rst_4row progressive_rst_420 partial_progressive progressive3 rgb cmyk_logo cymk ycck grayscale_16x24_sampling2x2 grayscale_24x16_sampling2x2 grayscale_large grayscale_long grayscale_square extraneous-data blank_800x280 mjpeg 16bit-qtables; do
+            curl -fsSL "$corpus/$n.jpg" -o "/tmp/$n.jpg"
+          done
+      - name: Install independent decode and comparison helpers
+        run: |
+          cat >/tmp/go_decode.go <<'EOF'
+          package main
+          import("fmt";"image/jpeg";"os")
+          func main(){
+            f,e:=os.Open(os.Args[1]);if e!=nil{panic(e)};defer f.Close()
+            img,e:=jpeg.Decode(f);if e!=nil{panic(e)};b:=img.Bounds()
+            o,e:=os.Create(os.Args[2]);if e!=nil{panic(e)};defer o.Close()
+            fmt.Fprintf(o,"P6\n%d %d\n255\n",b.Dx(),b.Dy())
+            for y:=b.Min.Y;y<b.Max.Y;y++{for x:=b.Min.X;x<b.Max.X;x++{r,g,bl,_:=img.At(x,y).RGBA();o.Write([]byte{byte(r>>8),byte(g>>8),byte(bl>>8)})}}
+          }
+          EOF
+          cat >/tmp/compare_ppm.py <<'PY'
+          import sys
+          from pathlib import Path
+          def ppm(path):
+              p=Path(path).read_bytes().split(b'\n',3)
+              return p[1],p[2],p[3]
+          aw,ah,a=ppm(sys.argv[1]);bw,bh,b=ppm(sys.argv[2]);assert (aw,ah)==(bw,bh);assert len(a)==len(b)
+          d=[abs(x-y) for x,y in zip(a,b)];m=max(d,default=0);mean=sum(d)/max(1,len(d));limit=int(sys.argv[4])
+          print(sys.argv[3],"max",m,"mean",mean,"limit",limit);assert m<=limit,(sys.argv[3],m,limit)
+          PY
+          cat >/tmp/compare_raw.py <<'PY'
+          import sys
+          from pathlib import Path
+          a=Path(sys.argv[1]).read_bytes().split(b'\n',3)[3];b=Path(sys.argv[2]).read_bytes();assert len(a)==len(b),(len(a),len(b))
+          d=[abs(x-y) for x,y in zip(a,b)];m=max(d,default=0);mean=sum(d)/max(1,len(d));limit=int(sys.argv[4])
+          print(sys.argv[3],"max",m,"mean",mean,"limit",limit);assert m<=limit,(sys.argv[3],m,limit)
+          PY
+      - name: Compare baseline and progressive JPEG against Go
+        run: |
+          set -euo pipefail
+          for n in baseline progressive; do
+            target/debug/ffmpeg -hide_banner -y -i "/tmp/$n.jpg" "/tmp/r-$n.ppm"
+            go run /tmp/go_decode.go "/tmp/$n.jpg" "/tmp/g-$n.ppm"
+            python3 /tmp/compare_ppm.py "/tmp/r-$n.ppm" "/tmp/g-$n.ppm" "$n" 4
+          done
+      - name: Compare restart scan-layout progressive and color variants against system FFmpeg
+        run: |
+          set -euo pipefail
+          for n in restarts non-interleaved-mcu rst_1block rst_8block rst_16block rst_1row rst_2row rst_4row progressive_rst_420 partial_progressive progressive3 rgb cmyk_logo cymk ycck; do
+            target/debug/ffmpeg -hide_banner -y -i "/tmp/$n.jpg" "/tmp/r-$n.ppm"
+            /usr/bin/ffmpeg -v error -y -i "/tmp/$n.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/f-$n.rgb"
+            python3 /tmp/compare_raw.py "/tmp/r-$n.ppm" "/tmp/f-$n.rgb" "$n" 16
+          done
+      - name: Compare grayscale unusual-sampling and tolerant container variants
+        run: |
+          set -euo pipefail
+          for n in grayscale_16x24_sampling2x2 grayscale_24x16_sampling2x2 grayscale_large grayscale_long grayscale_square extraneous-data blank_800x280 mjpeg; do
+            target/debug/ffmpeg -hide_banner -y -i "/tmp/$n.jpg" "/tmp/r-$n.ppm"
+            /usr/bin/ffmpeg -v error -y -i "/tmp/$n.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/f-$n.rgb"
+            python3 /tmp/compare_raw.py "/tmp/r-$n.ppm" "/tmp/f-$n.rgb" "$n" 16
+          done
+      - name: Validate 16-bit quantization tables
+        run: |
+          set -euo pipefail
+          target/debug/ffmpeg -hide_banner -y -i /tmp/16bit-qtables.jpg /tmp/r-16bit-qtables.ppm
+          /usr/bin/ffmpeg -v error -y -i /tmp/16bit-qtables.jpg -f rawvideo -pix_fmt rgb24 /tmp/f-16bit-qtables.rgb
+          python3 /tmp/compare_raw.py /tmp/r-16bit-qtables.ppm /tmp/f-16bit-qtables.rgb 16bit-qtables 16

@@ -137,7 +137,7 @@ fn capability_list_includes_implemented_rasters() {
     for codec in ["pbm", "pgm", "ppm", "bmp", "targa", "png"] {
         assert!(stdout.contains(codec), "missing codec {codec}");
     }
-    assert!(!stdout.contains("mjpeg"));
+    assert!(stdout.contains("mjpeg"), "missing image codec mjpeg");
 }
 
 #[test]

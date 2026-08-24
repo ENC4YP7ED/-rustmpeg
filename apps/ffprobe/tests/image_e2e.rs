@@ -104,7 +104,7 @@ fn capability_lists_advertise_only_implemented_image_surface() {
     for codec in ["pbm", "pgm", "ppm", "png"] {
         assert!(codecs.contains(codec), "missing image codec {codec}");
     }
-    assert!(!codecs.contains("mjpeg"));
+    assert!(codecs.contains("mjpeg"), "missing image codec mjpeg");
 }
 
 #[test]

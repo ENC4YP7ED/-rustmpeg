@@ -42,7 +42,8 @@ fn tolerance(codec: CodecId) -> f64 {
         | CodecId::Ppm
         | CodecId::Bmp
         | CodecId::Targa
-        | CodecId::Png => {
+        | CodecId::Png
+        | CodecId::Jpeg => {
             unreachable!("PCM test received image codec")
         }
     }
