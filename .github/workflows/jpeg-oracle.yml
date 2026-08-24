@@ -1,282 +1,131 @@
-name: jpeg-color-gate
+name: jpeg-color-diagnostics
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  color-models:
+  diagnose:
     if: github.event.pull_request.number == 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-      - name: Install test toolchain and reference decoder
+      - name: Install tools
         run: |
           rustup toolchain install 1.98.0 --profile minimal --component rustfmt
           rustup default 1.98.0
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
-      - name: Apply asserted JPEG color-model patch
-        shell: bash
+      - name: Apply candidate color implementation
         run: |
-          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          p=Path('crates/rm-codec/src/jpeg_decode/full.rs'); s=p.read_text()
+          assert 'enum ColorModel' not in s
+          s=s.replace('struct Frame {','''#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+          enum ColorModel { Gray, Ycbcr, Rgb, Cmyk, Ycck }
 
-          p = Path('crates/rm-codec/src/jpeg_decode/full.rs')
-          s = p.read_text()
-          if 'enum ColorModel' in s:
-              raise SystemExit('ColorModel already exists on branch; temporary gate should be removed')
-
-          anchor = 'struct Frame {'
-          assert anchor in s
-          s = s.replace(anchor, '''#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-          enum ColorModel {
-              Gray,
-              Ycbcr,
-              Rgb,
-              Cmyk,
-              Ycck,
-          }
-
-          struct Frame {''', 1)
-
-          old = 'if width == 0 || height == 0 || !(count == 1 || count == 3) {'
-          assert old in s
-          s = s.replace(old, 'if width == 0 || height == 0 || !(count == 1 || count == 3 || count == 4) {', 1)
-          old = '"JPEG frame must contain 1 or 3 components"'
-          assert old in s
-          s = s.replace(old, '"JPEG frame must contain 1, 3, or 4 components"', 1)
-
-          start = s.index('fn render(')
-          end = s.index('\npub fn decode_jpeg', start)
-          render = r'''fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
-              let yy = f64::from(y);
-              let cb = f64::from(cb) - 128.0;
-              let cr = f64::from(cr) - 128.0;
+          struct Frame {''',1)
+          old='if width == 0 || height == 0 || !(count == 1 || count == 3) {'; assert old in s
+          s=s.replace(old,'if width == 0 || height == 0 || !(count == 1 || count == 3 || count == 4) {',1)
+          s=s.replace('"JPEG frame must contain 1 or 3 components"','"JPEG frame must contain 1, 3, or 4 components"',1)
+          start=s.index('fn render('); end=s.index('\npub fn decode_jpeg',start)
+          s=s[:start]+r'''fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> [u8; 3] {
+              let yy=f64::from(y); let cb=f64::from(cb)-128.0; let cr=f64::from(cr)-128.0;
               [
-                  (yy + 1.402 * cr).round().clamp(0.0, 255.0) as u8,
-                  (yy - 0.344_136 * cb - 0.714_136 * cr)
-                      .round()
-                      .clamp(0.0, 255.0) as u8,
-                  (yy + 1.772 * cb).round().clamp(0.0, 255.0) as u8,
+                  (yy+1.402*cr).round().clamp(0.0,255.0) as u8,
+                  (yy-0.344_136*cb-0.714_136*cr).round().clamp(0.0,255.0) as u8,
+                  (yy+1.772*cb).round().clamp(0.0,255.0) as u8,
               ]
           }
-
-          fn mul_div_255(a: u8, b: u8) -> u8 {
-              ((u16::from(a) * u16::from(b) + 127) / 255) as u8
-          }
-
-          fn identify_color_model(frame: &Frame, adobe_transform: Option<u8>) -> Result<ColorModel> {
-              match frame.components.len() {
-                  1 => Ok(ColorModel::Gray),
-                  3 => {
-                      let ids: Vec<u8> = frame.components.iter().map(|component| component.id).collect();
-                      if ids == [b'R', b'G', b'B'] || adobe_transform == Some(0) {
-                          Ok(ColorModel::Rgb)
-                      } else if adobe_transform == Some(2) {
-                          Err(MediaError::invalid_data(
-                              "Adobe YCCK transform requires four JPEG components",
-                          ))
-                      } else {
-                          Ok(ColorModel::Ycbcr)
-                      }
-                  }
-                  4 => match adobe_transform {
-                      Some(2) => Ok(ColorModel::Ycck),
-                      Some(1) => Err(MediaError::invalid_data(
-                          "Adobe YCbCr transform cannot describe four JPEG components",
-                      )),
-                      Some(0) | None => Ok(ColorModel::Cmyk),
-                      Some(_) => Err(MediaError::unsupported(
-                          "unsupported Adobe JPEG color transform",
-                      )),
-                  },
-                  _ => Err(MediaError::unsupported("unsupported JPEG component count")),
+          fn mul255(a:u8,b:u8)->u8 { ((u16::from(a)*u16::from(b)+127)/255) as u8 }
+          fn identify_color_model(frame:&Frame, adobe:Option<u8>)->Result<ColorModel>{
+              match frame.components.len(){
+                  1=>Ok(ColorModel::Gray),
+                  3=>{let ids:Vec<u8>=frame.components.iter().map(|c|c.id).collect();
+                      if ids==[b'R',b'G',b'B'] || adobe==Some(0){Ok(ColorModel::Rgb)}else{Ok(ColorModel::Ycbcr)}},
+                  4=>if adobe==Some(2){Ok(ColorModel::Ycck)}else{Ok(ColorModel::Cmyk)},
+                  _=>Err(MediaError::unsupported("unsupported JPEG component count")),
               }
           }
-
-          fn render(
-              frame: Frame,
-              qtables: &[Option<[u16; 64]>; 4],
-              adobe_transform: Option<u8>,
-          ) -> Result<VideoFrame> {
-              let color_model = identify_color_model(&frame, adobe_transform)?;
-              let mut planes = Vec::with_capacity(frame.components.len());
-              for component in &frame.components {
-                  let qtable = qtables[usize::from(component.tq)]
-                      .as_ref()
-                      .ok_or_else(|| MediaError::invalid_data("missing JPEG quantization table"))?;
-                  let width = component.padded_blocks_x * 8;
-                  let height = component.padded_blocks_y * 8;
-                  let mut plane = vec![0u8; width * height];
-                  for by in 0..component.padded_blocks_y {
-                      for bx in 0..component.padded_blocks_x {
-                          let source = &component.coeffs[by * component.padded_blocks_x + bx];
-                          let mut dequantized = [0i32; 64];
-                          for k in 0..64 {
-                              dequantized[k] = source[k]
-                                  .checked_mul(i32::from(qtable[k]))
-                                  .ok_or_else(|| MediaError::overflow("JPEG dequantization overflow"))?;
-                          }
-                          let block = idct(&dequantized);
-                          for y in 0..8 {
-                              let dst = (by * 8 + y) * width + bx * 8;
-                              plane[dst..dst + 8].copy_from_slice(&block[y * 8..y * 8 + 8]);
-                          }
-                      }
-                  }
-                  planes.push((plane, width));
+          fn render(frame:Frame,qtables:&[Option<[u16;64]>;4],adobe:Option<u8>)->Result<VideoFrame>{
+              let model=identify_color_model(&frame,adobe)?; let mut planes=Vec::new();
+              for c in &frame.components{
+                  let qt=qtables[usize::from(c.tq)].as_ref().ok_or_else(||MediaError::invalid_data("missing JPEG quantization table"))?;
+                  let w=c.padded_blocks_x*8; let h=c.padded_blocks_y*8; let mut plane=vec![0u8;w*h];
+                  for by in 0..c.padded_blocks_y{for bx in 0..c.padded_blocks_x{
+                      let src=&c.coeffs[by*c.padded_blocks_x+bx]; let mut dq=[0i32;64];
+                      for k in 0..64{dq[k]=src[k].checked_mul(i32::from(qt[k])).ok_or_else(||MediaError::overflow("JPEG dequantization overflow"))?;}
+                      let block=idct(&dq); for yy in 0..8{let dst=(by*8+yy)*w+bx*8;plane[dst..dst+8].copy_from_slice(&block[yy*8..yy*8+8]);}
+                  }} planes.push((plane,w));
               }
-
-              if color_model == ColorModel::Gray {
-                  let (plane, stride) = &planes[0];
-                  let mut output = vec![0u8; frame.width * frame.height];
-                  for y in 0..frame.height {
-                      output[y * frame.width..(y + 1) * frame.width]
-                          .copy_from_slice(&plane[y * *stride..y * *stride + frame.width]);
-                  }
-                  return VideoFrame::from_vec(
-                      u32::try_from(frame.width).unwrap(),
-                      u32::try_from(frame.height).unwrap(),
-                      PixelFormat::Gray8,
-                      output,
-                  );
-              }
-
-              let mut output = Vec::with_capacity(frame.width * frame.height * 3);
-              for y in 0..frame.height {
-                  for x in 0..frame.width {
-                      let mut sample = [0u8; 4];
-                      for ci in 0..frame.components.len() {
-                          let component = &frame.components[ci];
-                          let sx = x * usize::from(component.h) / usize::from(frame.max_h);
-                          let sy = y * usize::from(component.v) / usize::from(frame.max_v);
-                          sample[ci] = planes[ci].0[sy * planes[ci].1 + sx];
-                      }
-                      let rgb = match color_model {
-                          ColorModel::Gray => unreachable!(),
-                          ColorModel::Rgb => [sample[0], sample[1], sample[2]],
-                          ColorModel::Ycbcr => ycbcr_to_rgb(sample[0], sample[1], sample[2]),
-                          ColorModel::Cmyk => {
-                              if adobe_transform == Some(0) {
-                                  [
-                                      mul_div_255(sample[0], sample[3]),
-                                      mul_div_255(sample[1], sample[3]),
-                                      mul_div_255(sample[2], sample[3]),
-                                  ]
-                              } else {
-                                  [
-                                      mul_div_255(255 - sample[0], 255 - sample[3]),
-                                      mul_div_255(255 - sample[1], 255 - sample[3]),
-                                      mul_div_255(255 - sample[2], 255 - sample[3]),
-                                  ]
-                              }
-                          }
-                          ColorModel::Ycck => {
-                              let inverted_cmy = ycbcr_to_rgb(sample[0], sample[1], sample[2]);
-                              [
-                                  mul_div_255(inverted_cmy[0], sample[3]),
-                                  mul_div_255(inverted_cmy[1], sample[3]),
-                                  mul_div_255(inverted_cmy[2], sample[3]),
-                              ]
-                          }
-                      };
-                      output.extend_from_slice(&rgb);
-                  }
-              }
-              VideoFrame::from_vec(
-                  u32::try_from(frame.width).unwrap(),
-                  u32::try_from(frame.height).unwrap(),
-                  PixelFormat::Rgb24,
-                  output,
-              )
+              if model==ColorModel::Gray{let (pl,stride)=&planes[0];let mut out=vec![0u8;frame.width*frame.height];for y in 0..frame.height{out[y*frame.width..(y+1)*frame.width].copy_from_slice(&pl[y**stride..y**stride+frame.width]);}return VideoFrame::from_vec(u32::try_from(frame.width).unwrap(),u32::try_from(frame.height).unwrap(),PixelFormat::Gray8,out);}
+              let mut out=Vec::with_capacity(frame.width*frame.height*3);
+              for y in 0..frame.height{for x in 0..frame.width{let mut v=[0u8;4];for ci in 0..frame.components.len(){let c=&frame.components[ci];let sx=x*usize::from(c.h)/usize::from(frame.max_h);let sy=y*usize::from(c.v)/usize::from(frame.max_v);v[ci]=planes[ci].0[sy*planes[ci].1+sx];}
+                  let rgb=match model{
+                      ColorModel::Gray=>unreachable!(),ColorModel::Rgb=>[v[0],v[1],v[2]],ColorModel::Ycbcr=>ycbcr_to_rgb(v[0],v[1],v[2]),
+                      ColorModel::Cmyk=>if adobe==Some(0){[mul255(v[0],v[3]),mul255(v[1],v[3]),mul255(v[2],v[3])]}else{[mul255(255-v[0],255-v[3]),mul255(255-v[1],255-v[3]),mul255(255-v[2],255-v[3])]},
+                      ColorModel::Ycck=>{let cm=ycbcr_to_rgb(v[0],v[1],v[2]);[mul255(cm[0],v[3]),mul255(cm[1],v[3]),mul255(cm[2],v[3])]},
+                  };out.extend_from_slice(&rgb);
+              }} VideoFrame::from_vec(u32::try_from(frame.width).unwrap(),u32::try_from(frame.height).unwrap(),PixelFormat::Rgb24,out)
           }
-          '''
-          s = s[:start] + render + s[end:]
-
-          old = '    let mut restart_interval = 0u16;\n    let mut saw_scan = false;'
-          assert old in s
-          s = s.replace(old, '    let mut restart_interval = 0u16;\n    let mut adobe_transform = None::<u8>;\n    let mut saw_scan = false;', 1)
-
-          anchor = '        match marker {\n            0xdb => parse_dqt(payload, &mut qtables)?,'
-          assert anchor in s
-          app14 = '''        match marker {
+          '''+s[end:]
+          old='    let mut restart_interval = 0u16;\n    let mut saw_scan = false;';assert old in s
+          s=s.replace(old,'    let mut restart_interval = 0u16;\n    let mut adobe_transform = None::<u8>;\n    let mut saw_scan = false;',1)
+          anchor='        match marker {\n            0xdb => parse_dqt(payload, &mut qtables)?,';assert anchor in s
+          s=s.replace(anchor,'''        match marker {
               0xee => {
                   if payload.starts_with(b"Adobe") {
-                      if payload.len() < 12 {
-                          return Err(MediaError::invalid_data("truncated Adobe APP14 JPEG marker"));
-                      }
-                      let transform = payload[11];
-                      if transform > 2 {
-                          return Err(MediaError::unsupported(
-                              "unsupported Adobe JPEG color transform",
-                          ));
-                      }
-                      if let Some(existing) = adobe_transform {
-                          if existing != transform {
-                              return Err(MediaError::invalid_data(
-                                  "conflicting Adobe APP14 JPEG transforms",
-                              ));
-                          }
-                      } else {
-                          adobe_transform = Some(transform);
-                      }
+                      if payload.len() < 12 { return Err(MediaError::invalid_data("truncated Adobe APP14 JPEG marker")); }
+                      let t=payload[11]; if t>2{return Err(MediaError::unsupported("unsupported Adobe JPEG color transform"));}
+                      adobe_transform=Some(t);
                   }
               }
-              0xdb => parse_dqt(payload, &mut qtables)?,'''
-          s = s.replace(anchor, app14, 1)
-
-          old = '    render(frame, &qtables)\n'
-          assert old in s
-          s = s.replace(old, '    render(frame, &qtables, adobe_transform)\n', 1)
-
-          assert 'count == 4' in s
-          assert '0xee =>' in s
-          assert 'render(frame, &qtables, adobe_transform)' in s
+              0xdb => parse_dqt(payload, &mut qtables)?,''',1)
+          old='    render(frame, &qtables)\n';assert old in s;s=s.replace(old,'    render(frame, &qtables, adobe_transform)\n',1)
           p.write_text(s)
           PY
           cargo fmt --all
-      - name: Run full regression suite
-        run: cargo test --workspace --all-targets
-      - name: Build rustmpeg
-        run: cargo build -p rustmpeg-ffmpeg
-      - name: Fetch pinned color fixtures
+          cargo build -p rustmpeg-ffmpeg
+      - name: Fetch fixtures and inspect JPEG color tags
         run: |
           set -euo pipefail
           root=https://raw.githubusercontent.com/imazen/codec-corpus/97836ec8ce8cdc59e95ef5467f24b7b6d370d896/jpeg-conformance/valid
-          for name in rgb cmyk_logo cymk ycck; do
-            curl --fail --location --silent --show-error "$root/$name.jpg" -o "/tmp/$name.jpg"
-          done
-      - name: Compare color models to independent FFmpeg
+          for n in rgb cmyk_logo cymk ycck; do curl -fsSL "$root/$n.jpg" -o "/tmp/$n.jpg"; done
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ['rgb','cmyk_logo','cymk','ycck']:
+              b=Path('/tmp/'+name+'.jpg').read_bytes(); i=2; adobe=None; sof=None
+              while i+1<len(b):
+                  if b[i]!=0xff: i+=1; continue
+                  while i<len(b) and b[i]==0xff:i+=1
+                  if i>=len(b):break
+                  m=b[i];i+=1
+                  if m in [0xd8,0xd9] or 0xd0<=m<=0xd7:continue
+                  if i+2>len(b):break
+                  ln=int.from_bytes(b[i:i+2],'big'); payload=b[i+2:i+ln]; i+=ln
+                  if m==0xee and payload.startswith(b'Adobe') and len(payload)>=12: adobe=payload[11]
+                  if m in (0xc0,0xc1,0xc2,0xc9,0xca):
+                      n=payload[5]; sof=(hex(m),payload[0],[(payload[6+j*3],payload[7+j*3],payload[8+j*3]) for j in range(n)])
+                  if m==0xda: break
+              print(name,'APP14=',adobe,'SOF=',sof)
+          PY
+      - name: Report every candidate delta
         run: |
-          set -euo pipefail
-          cat >/tmp/compare.py <<'PY'
+          set -u
+          cat >/tmp/cmp.py <<'PY'
           import sys
           from pathlib import Path
-          ppm=Path(sys.argv[1]).read_bytes().split(b'\n',3)[3]
-          ref=Path(sys.argv[2]).read_bytes()
-          assert len(ppm)==len(ref), (len(ppm),len(ref))
-          diffs=[abs(a-b) for a,b in zip(ppm,ref)]
-          print(sys.argv[3], 'max=', max(diffs, default=0), 'mean=', sum(diffs)/max(1,len(diffs)))
-          assert max(diffs, default=0) <= int(sys.argv[4])
+          a=Path(sys.argv[1]).read_bytes().split(b'\n',3)[3];b=Path(sys.argv[2]).read_bytes();d=[abs(x-y) for x,y in zip(a,b)]
+          print(sys.argv[3], 'len',len(a),len(b),'max',max(d,default=0),'mean',sum(d)/max(1,len(d)), 'first-rust',list(a[:12]),'first-ref',list(b[:12]))
           PY
-          for name in rgb cmyk_logo cymk ycck; do
-            echo "=== $name ==="
-            target/debug/ffmpeg -hide_banner -y -i "/tmp/$name.jpg" "/tmp/rustmpeg-$name.ppm"
-            /usr/bin/ffmpeg -v error -y -i "/tmp/$name.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/reference-$name.rgb"
-            python3 /tmp/compare.py "/tmp/rustmpeg-$name.ppm" "/tmp/reference-$name.rgb" "$name" 16
+          fail=0
+          for n in rgb cmyk_logo cymk ycck; do
+            target/debug/ffmpeg -hide_banner -y -i "/tmp/$n.jpg" "/tmp/r-$n.ppm" || { echo "rustmpeg decode failed: $n"; fail=1; continue; }
+            /usr/bin/ffmpeg -v error -y -i "/tmp/$n.jpg" -f rawvideo -pix_fmt rgb24 "/tmp/f-$n.rgb" || { echo "reference failed: $n"; fail=1; continue; }
+            python3 /tmp/cmp.py "/tmp/r-$n.ppm" "/tmp/f-$n.rgb" "$n"
           done
-      - name: Commit only validated source
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/rm-codec/src/jpeg_decode/full.rs
-          git commit -m "feat(jpeg): decode RGB CMYK and YCCK color models"
-          git push origin "HEAD:${{ github.head_ref }}"
+          exit $fail
